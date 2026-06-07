@@ -1,17 +1,22 @@
 # Roadmap
 
-MVP atual: gravação (aba + mic) + transcrição em blocos via OpenAI + resumo com
-action items, armazenado em arquivo JSON no backend.
+MVP atual: gravação (aba + mic) + transcrição em blocos com timestamps via
+OpenAI + resumo com action items + **áudio completo salvo** + **painel web**
+estilo Fireflies (lista de reuniões, player de áudio e transcrição minuto a
+minuto com seek). Armazenado em arquivo JSON + arquivos de áudio no backend.
 
 ## Próximos passos
 
 ### Transcrição
+- [x] Timestamps por bloco (transcrição minuto a minuto).
 - [ ] **Realtime API** da OpenAI (WebSocket) para transcrição palavra-a-palavra ao vivo.
 - [ ] Diarização (identificar quem falou) — combinar VAD + speaker labels.
-- [ ] Timestamps por trecho (usar `whisper-1` com `response_format=verbose_json`).
+- [ ] Timestamps por palavra (usar `whisper-1` com `response_format=verbose_json`).
 
 ### Áudio
-- [ ] Salvar o áudio completo da reunião (gravador contínuo paralelo) e permitir download.
+- [x] Salvar o áudio completo da reunião (gravador contínuo) e reproduzir no painel.
+- [ ] Botão de download do áudio no painel.
+- [ ] Corrigir a duração do `.webm` no servidor (ts-ebml) em vez do hack no player.
 - [ ] Controle de ganho/normalização entre aba e microfone.
 - [ ] Detecção de silêncio para não enviar blocos vazios à API.
 
@@ -22,8 +27,9 @@ action items, armazenado em arquivo JSON no backend.
 - [ ] Reprocessar resumo com prompts customizados.
 
 ### Extensão
+- [x] Painel de histórico (lista de reuniões + detalhe com áudio e transcrição).
 - [ ] Ícones definitivos e onboarding.
-- [ ] Página de histórico completa (abrir reunião, editar título, exportar).
+- [ ] Editar título / exportar reunião no painel.
 - [ ] Auto-detecção de plataformas (Meet/Zoom/Teams) e início automático.
 - [ ] Indicador visual de gravação na aba.
 

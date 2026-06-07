@@ -20,6 +20,7 @@ const els = {
   grantMic: $('grantMic'),
   settingsStatus: $('settingsStatus'),
   copyTranscript: $('copyTranscript'),
+  openDashboard: $('openDashboard'),
   viewMeetings: $('viewMeetings'),
   meetingsList: $('meetingsList'),
 };
@@ -38,7 +39,8 @@ function renderSession(session) {
 
   if (session?.startedAt) {
     const secs = Math.round(((session.recording ? Date.now() : session.startedAt + 0) - session.startedAt) / 1000);
-    els.meta.textContent = `${session.segments || 0} bloco(s) transcrito(s)` + (recording ? ` · ${secs}s` : '');
+    const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
+    els.meta.textContent = `${segCount} bloco(s) transcrito(s)` + (recording ? ` · ${secs}s` : '');
   } else {
     els.meta.textContent = '';
   }
@@ -148,6 +150,10 @@ els.copyTranscript.addEventListener('click', async () => {
   setTimeout(() => (els.copyTranscript.textContent = 'Copiar'), 1200);
 });
 
+els.openDashboard.addEventListener('click', () => {
+  chrome.tabs.create({ url: `${settings.backendUrl}/` });
+});
+
 els.viewMeetings.addEventListener('click', async () => {
   els.meetingsList.classList.toggle('hidden');
   if (els.meetingsList.classList.contains('hidden')) return;
@@ -164,9 +170,13 @@ els.viewMeetings.addEventListener('click', async () => {
       const div = document.createElement('div');
       div.className = 'meeting-item';
       const date = new Date(m.createdAt).toLocaleString('pt-BR');
+      const audioTag = m.hasAudio ? ' · 🎧 áudio' : '';
       div.innerHTML = `<div class="title">${escapeHtml(m.title)}</div>` +
-        `<div class="muted">${date}</div>` +
+        `<div class="muted">${date}${audioTag}</div>` +
         `<div class="muted">${escapeHtml(m.transcriptPreview || '')}…</div>`;
+      div.addEventListener('click', () =>
+        chrome.tabs.create({ url: `${settings.backendUrl}/?id=${m.id}` })
+      );
       els.meetingsList.appendChild(div);
     });
   } catch (err) {

@@ -3,6 +3,10 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { promises as fs } from 'node:fs';
 
 import { transcribe, summarize, config } from './src/openai.js';
 import {
@@ -15,13 +19,28 @@ import {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const AUDIO_DIR = path.join(__dirname, 'data', 'audio');
+const PUBLIC_DIR = path.join(__dirname, 'public');
+await fs.mkdir(AUDIO_DIR, { recursive: true });
+
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
 
-// Upload de áudio em memória. Limite de 25MB (limite da API de transcrição).
+// Upload de BLOCO para transcrição: em memória, limite 25MB (limite da OpenAI).
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+// Upload do ÁUDIO COMPLETO da reunião: gravado em disco, limite 500MB.
+const audioStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, AUDIO_DIR),
+  filename: (req, file, cb) => cb(null, `${crypto.randomUUID()}.webm`),
+});
+const uploadAudio = multer({
+  storage: audioStorage,
+  limits: { fileSize: 500 * 1024 * 1024 },
 });
 
 // Wrapper para capturar erros de handlers async.
@@ -50,6 +69,25 @@ app.post(
   })
 );
 
+// --- Áudio completo da reunião -------------------------------------------
+// Upload do áudio gravado (devolve um audioId para vincular à reunião).
+app.post(
+  '/api/audio',
+  uploadAudio.single('audio'),
+  wrap(async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Envie um arquivo no campo "audio".' });
+    res.status(201).json({ audioId: path.parse(req.file.filename).name });
+  })
+);
+
+// Servir o áudio (express.static já dá suporte a Range requests => seek funciona).
+app.use(
+  '/api/audio',
+  express.static(AUDIO_DIR, {
+    setHeaders: (res) => res.set('Accept-Ranges', 'bytes'),
+  })
+);
+
 // --- Resumo de uma transcrição -------------------------------------------
 app.post(
   '/api/summarize',
@@ -75,7 +113,7 @@ app.get('/api/meetings/:id', wrap(async (req, res) => {
 }));
 
 app.post('/api/meetings', wrap(async (req, res) => {
-  const { title, transcript, durationMs, summarize: doSummarize } = req.body || {};
+  const { title, transcript, segments, durationMs, audioId, summarize: doSummarize } = req.body || {};
 
   let summary = null;
   if (doSummarize && transcript && transcript.trim()) {
@@ -86,7 +124,7 @@ app.post('/api/meetings', wrap(async (req, res) => {
     }
   }
 
-  const meeting = await createMeeting({ title, transcript, summary, durationMs });
+  const meeting = await createMeeting({ title, transcript, segments, summary, durationMs, audioId });
   res.status(201).json(meeting);
 }));
 
@@ -95,6 +133,9 @@ app.patch('/api/meetings/:id', wrap(async (req, res) => {
   if (!updated) return res.status(404).json({ error: 'Reunião não encontrada.' });
   res.json(updated);
 }));
+
+// --- Painel web (dashboard estilo Fireflies) ------------------------------
+app.use(express.static(PUBLIC_DIR));
 
 // --- Tratamento de erros --------------------------------------------------
 app.use((err, req, res, next) => {

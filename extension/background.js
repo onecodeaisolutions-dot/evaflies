@@ -79,8 +79,9 @@ async function startRecording() {
     startedAt: Date.now(),
     tabTitle: tab.title || 'Reunião',
     transcript: '',
-    segments: 0,
+    segments: [],
     status: 'Gravando…',
+    audioId: null,
     meeting: null,
   });
 
@@ -130,7 +131,9 @@ async function finalize() {
       body: JSON.stringify({
         title: session.tabTitle,
         transcript,
+        segments: session.segments || [],
         durationMs,
+        audioId: session.audioId || null,
         summarize: true,
       }),
     });
@@ -171,10 +174,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const session = (await getSession()) || {};
         const sep = session.transcript ? ' ' : '';
         const transcript = (session.transcript || '') + sep + message.text;
-        await patchSession({
-          transcript,
-          segments: (session.segments || 0) + 1,
-        });
+        const segments = Array.isArray(session.segments) ? session.segments : [];
+        segments.push({ startMs: message.startMs, endMs: message.endMs, text: message.text });
+        await patchSession({ transcript, segments });
         broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });
         break;
@@ -194,6 +196,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'CAPTURE_STOPPED':
+        await patchSession({ audioId: message.audioId || null });
         await finalize();
         sendResponse({ ok: true });
         break;

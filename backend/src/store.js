@@ -37,8 +37,9 @@ async function writeAll(meetings) {
 export async function listMeetings() {
   const meetings = await readAll();
   return meetings
-    .map(({ transcript, ...rest }) => ({
+    .map(({ transcript, segments, ...rest }) => ({
       ...rest,
+      hasAudio: Boolean(rest.audioId),
       transcriptPreview: (transcript || '').slice(0, 200),
     }))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -51,14 +52,16 @@ export async function getMeeting(id) {
 }
 
 /** Cria uma reunião. */
-export async function createMeeting({ title, transcript, summary, durationMs }) {
+export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId }) {
   const meetings = await readAll();
   const meeting = {
     id: crypto.randomUUID(),
     title: title || `Reunião ${new Date().toLocaleString('pt-BR')}`,
     transcript: transcript || '',
+    segments: Array.isArray(segments) ? segments : [],
     summary: summary || null,
     durationMs: durationMs || 0,
+    audioId: audioId || null,
     createdAt: new Date().toISOString(),
   };
   meetings.push(meeting);

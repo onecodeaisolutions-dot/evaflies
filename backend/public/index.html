@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EvaFlies — Reuniões</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">🎙️ <span>EvaFlies</span></div>
+      <div class="sidebar-head">
+        <h2>Reuniões</h2>
+        <input id="search" type="text" placeholder="Buscar por título…" />
+      </div>
+      <div id="list" class="list"></div>
+    </aside>
+
+    <main id="detail" class="detail">
+      <div class="empty">
+        <h1>Selecione uma reunião</h1>
+        <p>Cada reunião gravada pela extensão aparece na lista à esquerda, com a
+          transcrição minuto a minuto e a gravação do áudio.</p>
+      </div>
+    </main>
+
+    <template id="detail-template">
+      <header class="detail-head">
+        <h1 class="title"></h1>
+        <div class="meta"></div>
+      </header>
+
+      <audio class="player" controls preload="metadata"></audio>
+      <p class="no-audio hidden">Sem áudio salvo para esta reunião.</p>
+
+      <nav class="tabs">
+        <button data-tab="transcript" class="tab active">Transcrição</button>
+        <button data-tab="summary" class="tab">Resumo</button>
+      </nav>
+
+      <section class="tab-panel" data-panel="transcript">
+        <div class="transcript"></div>
+      </section>
+
+      <section class="tab-panel hidden" data-panel="summary">
+        <div class="summary-text"></div>
+        <h3>Action items</h3>
+        <ul class="action-items"></ul>
+        <div class="topics"></div>
+      </section>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

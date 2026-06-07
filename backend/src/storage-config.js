@@ -4,9 +4,14 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
-// Sanitiza: remove espaços/quebras de linha e barras finais (causam
-// "Invalid path specified in request URL" quando há barra dupla na URL).
-export const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+// Sanitiza a URL: remove espaços, barras finais e um eventual "/rest/v1"
+// colado por engano (o SDK já adiciona esse caminho). Sem isso o Supabase
+// responde "Invalid path specified in request URL".
+export const SUPABASE_URL = (process.env.SUPABASE_URL || '')
+  .trim()
+  .replace(/\/+$/, '')
+  .replace(/\/rest\/v1$/i, '')
+  .replace(/\/+$/, '');
 export const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 export const SUPABASE_BUCKET = (process.env.SUPABASE_BUCKET || 'meeting-audio').trim();
 export const useSupabase = Boolean(SUPABASE_URL && SUPABASE_KEY);

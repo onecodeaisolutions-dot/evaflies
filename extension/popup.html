@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>EvaFlies</title>
+  </head>
+  <body>
+    <header>
+      <h1>🎙️ EvaFlies</h1>
+      <button id="settingsToggle" class="icon-btn" title="Configurações">⚙️</button>
+    </header>
+
+    <section id="settings" class="panel hidden">
+      <label for="backendUrl">URL do backend</label>
+      <div class="row">
+        <input id="backendUrl" type="text" placeholder="http://localhost:3000" />
+        <button id="saveSettings" class="btn-sm">Salvar</button>
+      </div>
+      <div class="row">
+        <button id="checkHealth" class="btn-sm">Testar conexão</button>
+        <button id="grantMic" class="btn-sm">Permitir microfone</button>
+      </div>
+      <p id="settingsStatus" class="muted"></p>
+    </section>
+
+    <section class="record-area">
+      <button id="recordBtn" class="record-btn">▶ Gravar</button>
+      <p id="status" class="status">Pronto.</p>
+      <p id="meta" class="muted"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Transcrição</h2>
+        <button id="copyTranscript" class="btn-sm" title="Copiar">Copiar</button>
+      </div>
+      <div id="transcript" class="transcript">
+        <span class="muted">A transcrição aparece aqui durante a gravação…</span>
+      </div>
+    </section>
+
+    <section id="summarySection" class="panel hidden">
+      <div class="panel-head"><h2>Resumo</h2></div>
+      <div id="summary" class="summary"></div>
+      <h3>Action items</h3>
+      <ul id="actionItems"></ul>
+      <div id="topics" class="topics"></div>
+    </section>
+
+    <footer>
+      <button id="viewMeetings" class="link-btn">Reuniões salvas</button>
+      <div id="meetingsList" class="meetings hidden"></div>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

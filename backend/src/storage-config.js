@@ -4,9 +4,11 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 
-export const SUPABASE_URL = process.env.SUPABASE_URL || '';
-export const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-export const SUPABASE_BUCKET = process.env.SUPABASE_BUCKET || 'meeting-audio';
+// Sanitiza: remove espaços/quebras de linha e barras finais (causam
+// "Invalid path specified in request URL" quando há barra dupla na URL).
+export const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+export const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+export const SUPABASE_BUCKET = (process.env.SUPABASE_BUCKET || 'meeting-audio').trim();
 export const useSupabase = Boolean(SUPABASE_URL && SUPABASE_KEY);
 export const storageMode = useSupabase ? 'supabase' : 'file';
 

@@ -94,6 +94,7 @@ body {
 .seg.active { background: var(--panel-2); }
 .seg .ts { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; padding-top: 1px; }
 .seg .txt { line-height: 1.55; }
+.seg .spk { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
 
 /* Summary ---------------------------------------------------------------- */
 .summary-text { line-height: 1.6; white-space: pre-wrap; }

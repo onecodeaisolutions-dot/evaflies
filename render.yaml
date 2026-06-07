@@ -1,0 +1,32 @@
+# Blueprint do Render. Em https://dashboard.render.com -> New -> Blueprint,
+# aponte para este repositório. O Render lê este arquivo e cria o serviço.
+services:
+  - type: web
+    name: evaflies-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false # você define o valor no painel do Render (secreto)
+      - key: NODE_VERSION
+        value: "20"
+      - key: TRANSCRIBE_MODEL
+        value: gpt-4o-transcribe
+      - key: SUMMARY_MODEL
+        value: gpt-4o-mini
+      - key: TRANSCRIBE_LANGUAGE
+        value: pt
+      - key: CORS_ORIGIN
+        value: "*"
+      # Para PERSISTIR reuniões e áudios entre deploys, use um disco (plano pago):
+      # - key: DATA_DIR
+      #   value: /var/data
+    # disk:
+    #   name: evaflies-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

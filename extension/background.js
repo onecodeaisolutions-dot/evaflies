@@ -93,6 +93,8 @@ async function startRecording() {
     streamId,
     backendUrl: settings.backendUrl,
     chunkMs: settings.chunkMs,
+    userName: settings.userName,
+    othersName: settings.othersName,
   }).catch(() => {});
 
   broadcast({ type: 'SESSION_UPDATE' });
@@ -172,10 +174,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Vindos do offscreen:
       case 'TRANSCRIPT_SEGMENT': {
         const session = (await getSession()) || {};
-        const sep = session.transcript ? ' ' : '';
-        const transcript = (session.transcript || '') + sep + message.text;
         const segments = Array.isArray(session.segments) ? session.segments : [];
-        segments.push({ startMs: message.startMs, endMs: message.endMs, text: message.text });
+        segments.push({
+          startMs: message.startMs,
+          endMs: message.endMs,
+          text: message.text,
+          speaker: message.speaker || null,
+        });
+        // Ordena por tempo de início (os canais chegam intercalados).
+        segments.sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+        const transcript = segments
+          .map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text))
+          .join('\n');
         await patchSession({ transcript, segments });
         broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });

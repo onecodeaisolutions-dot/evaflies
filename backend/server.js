@@ -20,7 +20,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUDIO_DIR = path.join(__dirname, 'data', 'audio');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const AUDIO_DIR = path.join(DATA_DIR, 'audio');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 await fs.mkdir(AUDIO_DIR, { recursive: true });
 

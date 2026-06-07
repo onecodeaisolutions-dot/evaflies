@@ -9,8 +9,9 @@ minuto com seek). Armazenado em arquivo JSON + arquivos de áudio no backend.
 
 ### Transcrição
 - [x] Timestamps por bloco (transcrição minuto a minuto).
+- [x] Diarização por canal: separa "Você" (microfone) de "Participantes" (aba).
+- [ ] Diarização por pessoa entre os participantes remotos (ex: pyannote / serviço dedicado).
 - [ ] **Realtime API** da OpenAI (WebSocket) para transcrição palavra-a-palavra ao vivo.
-- [ ] Diarização (identificar quem falou) — combinar VAD + speaker labels.
 - [ ] Timestamps por palavra (usar `whisper-1` com `response_format=verbose_json`).
 
 ### Áudio

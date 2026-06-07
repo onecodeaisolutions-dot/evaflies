@@ -52,6 +52,12 @@ Variáveis de ambiente (`.env`):
 | `SUMMARY_MODEL` | `gpt-4o-mini` | Modelo usado para gerar o resumo / action items. |
 | `TRANSCRIBE_LANGUAGE` | `pt` | Idioma esperado da fala (ISO-639-1). |
 | `CORS_ORIGIN` | `*` | Origem permitida para CORS. |
+| `DATA_DIR` | `backend/data` | Onde salvar `meetings.json` e os áudios. Útil para apontar a um disco persistente no deploy. |
+
+> **Colocar online:** dá para hospedar o backend no Render (URL `https`) e
+> apontar a extensão para ele. Veja o passo a passo em
+> [`docs/DEPLOY.md`](docs/DEPLOY.md). O blueprint [`render.yaml`](render.yaml) já
+> deixa quase tudo pronto.
 
 ---
 
@@ -94,6 +100,23 @@ A extensão mantém **dois gravadores** sobre o mesmo áudio mixado (aba + mic):
 - **Gravador contínuo** — um `MediaRecorder` que roda do início ao fim e gera o
   **áudio completo** da reunião, enviado ao backend (`/api/audio`) ao parar e
   vinculado à reunião para reprodução no painel.
+
+### Identificação de falantes (diarização)
+
+Como capturamos o **microfone** e o **áudio da aba** em canais separados, a
+extensão grava e transcreve **cada canal isoladamente**:
+
+- microfone → **"Você"** (o nome é configurável no popup);
+- áudio da aba → **"Participantes"**.
+
+Cada bloco passa por uma checagem de nível de áudio — blocos em silêncio não são
+enviados à API (evita alucinação e custo). Os trechos dos dois canais são
+intercalados por timestamp, formando o diálogo com quem falou.
+
+> Limitação: isso separa **você** dos **demais**, mas não distingue um
+> participante remoto de outro (todos caem em "Participantes"). Diarização por
+> pessoa exige um modelo dedicado (ex: pyannote) — está no
+> [ROADMAP](docs/ROADMAP.md).
 
 > Reiniciar o gravador (em vez de usar `timeslice`) é importante: blocos gerados
 > por `timeslice` não têm cabeçalho próprio e não podem ser transcritos

@@ -4,6 +4,10 @@ export const DEFAULTS = {
   backendUrl: 'http://localhost:3000',
   // Tamanho de cada bloco de transcrição, em milissegundos.
   chunkMs: 20000,
+  // Como o seu canal (microfone) aparece na transcrição.
+  userName: 'Você',
+  // Nome para o canal da aba (demais participantes da reunião).
+  othersName: 'Participantes',
 };
 
 const STORAGE_KEY = 'evaflies_settings';

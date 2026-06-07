@@ -1,24 +1,25 @@
-// Offscreen document: captura o áudio da aba + microfone, mixa, e:
-//   1) grava em blocos (~20s) -> transcrição com timestamps;
-//   2) grava continuamente -> áudio completo salvo ao final.
+// Offscreen document: captura o áudio da aba + microfone e:
+//   1) grava CADA CANAL em blocos (~20s) -> transcrição com falante + timestamps
+//      (microfone = "Você"; aba = "Participantes");
+//   2) grava o mix continuamente -> áudio completo salvo ao final.
+
+const SILENCE_THRESHOLD = 6; // amplitude (0..127). Abaixo disso = silêncio, não transcreve.
 
 let audioContext = null;
 let mixedStream = null;
 let tabStream = null;
 let micStream = null;
 
-// Gravador por blocos (transcrição)
-let chunkRecorder = null;
-let chunkBlobs = [];
-let chunkStartMs = 0;
+// Canais de transcrição (1 = aba, +1 se houver microfone).
+let channels = [];
 
-// Gravador contínuo (áudio completo)
+// Gravador contínuo (áudio completo do mix)
 let fullRecorder = null;
 let fullBlobs = [];
-let fullDone = null; // Promise resolvida quando o áudio completo está pronto
+let fullDone = null;
 
 let running = false;
-let restartTimer = null;
+let meterTimer = null;
 let sessionStartMs = 0;
 let backendUrl = '';
 let chunkMs = 20000;
@@ -26,33 +27,37 @@ let chunkMs = 20000;
 function send(message) {
   chrome.runtime.sendMessage({ target: 'background', ...message }).catch(() => {});
 }
-
 function status(text) {
   send({ type: 'CAPTURE_STATUS', status: text });
 }
+const pickMime = () =>
+  MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
 
 // --------------------------------------------------------------------------
 // Captura e mixagem
 // --------------------------------------------------------------------------
-async function startCapture(streamId, _backendUrl, _chunkMs) {
-  backendUrl = _backendUrl;
-  chunkMs = _chunkMs || 20000;
+async function startCapture(streamId, opts) {
+  backendUrl = opts.backendUrl;
+  chunkMs = opts.chunkMs || 20000;
 
-  // 1) Áudio da aba (via streamId gerado pelo service worker).
+  // 1) Áudio da aba.
   tabStream = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
     video: false,
   });
 
-  // 2) Microfone (opcional).
+  // 2) Microfone (com cancelamento de eco/ruído por padrão -> reduz vazamento da aba).
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
   } catch {
     micStream = null;
     status('Microfone indisponível — gravando só o áudio da aba.');
   }
 
-  // 3) Mixa aba + microfone num único stream.
+  // 3) AudioContext: mix (para o áudio completo) + devolver áudio da aba aos alto-falantes.
   audioContext = new AudioContext();
   const destination = audioContext.createMediaStreamDestination();
   const tabSource = audioContext.createMediaStreamSource(tabStream);
@@ -64,15 +69,54 @@ async function startCapture(streamId, _backendUrl, _chunkMs) {
   sessionStartMs = Date.now();
   running = true;
 
+  // 4) Canais de transcrição (cada um com um medidor de nível para detectar silêncio).
+  channels = [];
+  channels.push(makeChannel(opts.othersName || 'Participantes', tabStream));
+  if (micStream) channels.push(makeChannel(opts.userName || 'Você', micStream));
+
   startFullRecorder();
-  startChunkRecorder();
-  if (micStream) status('Gravando (aba + microfone)…');
+  channels.forEach(startChannelRecorder);
+  meterTimer = setInterval(updateMeters, 100);
+
+  status(micStream ? 'Gravando (aba + microfone)…' : 'Gravando (aba)…');
 }
 
-const pickMime = () =>
-  MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+// --------------------------------------------------------------------------
+// Medidor de nível por canal (para pular blocos em silêncio)
+// --------------------------------------------------------------------------
+function makeChannel(speaker, stream) {
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 512;
+  audioContext.createMediaStreamSource(stream).connect(analyser);
+  return {
+    speaker,
+    stream,
+    analyser,
+    buf: new Uint8Array(analyser.fftSize),
+    recorder: null,
+    blobs: [],
+    startMs: 0,
+    peak: 0,
+    done: null,
+    resolveDone: null,
+  };
+}
 
-// Gravador contínuo: acumula tudo num único arquivo válido.
+function updateMeters() {
+  for (const ch of channels) {
+    ch.analyser.getByteTimeDomainData(ch.buf);
+    let m = 0;
+    for (let i = 0; i < ch.buf.length; i++) {
+      const d = Math.abs(ch.buf[i] - 128);
+      if (d > m) m = d;
+    }
+    if (m > ch.peak) ch.peak = m;
+  }
+}
+
+// --------------------------------------------------------------------------
+// Gravação
+// --------------------------------------------------------------------------
 function startFullRecorder() {
   fullBlobs = [];
   fullRecorder = new MediaRecorder(mixedStream, { mimeType: pickMime() });
@@ -82,39 +126,42 @@ function startFullRecorder() {
     };
     fullRecorder.onstop = () => resolve(new Blob(fullBlobs, { type: 'audio/webm' }));
   });
-  fullRecorder.start(2000); // emite pedaços a cada 2s (mesma sessão = arquivo válido)
+  fullRecorder.start(2000);
 }
 
-// Gravador por blocos: reinicia a cada chunkMs para gerar arquivos transcrevíveis.
-function startChunkRecorder() {
-  chunkBlobs = [];
-  chunkStartMs = Date.now() - sessionStartMs; // offset do início deste bloco
-  chunkRecorder = new MediaRecorder(mixedStream, { mimeType: pickMime() });
+function startChannelRecorder(ch) {
+  ch.blobs = [];
+  ch.peak = 0;
+  ch.startMs = Date.now() - sessionStartMs;
+  ch.done = new Promise((resolve) => (ch.resolveDone = resolve));
+  ch.recorder = new MediaRecorder(ch.stream, { mimeType: pickMime() });
 
-  chunkRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) chunkBlobs.push(e.data);
+  ch.recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) ch.blobs.push(e.data);
   };
 
-  chunkRecorder.onstop = async () => {
+  ch.recorder.onstop = async () => {
     const endMs = Date.now() - sessionStartMs;
-    const blob = new Blob(chunkBlobs, { type: 'audio/webm' });
-    if (blob.size > 1200) {
-      await transcribeChunk(blob, chunkStartMs, endMs);
+    const speaking = ch.peak >= SILENCE_THRESHOLD;
+    const blob = new Blob(ch.blobs, { type: 'audio/webm' });
+    if (speaking && blob.size > 1200) {
+      await transcribeChunk(blob, ch.speaker, ch.startMs, endMs);
     }
     if (running) {
-      startChunkRecorder(); // próximo bloco
+      startChannelRecorder(ch); // próximo bloco do mesmo canal
     } else {
-      await finishSession();
+      ch.resolveDone();
     }
   };
 
-  chunkRecorder.start();
-  restartTimer = setTimeout(() => {
-    if (chunkRecorder && chunkRecorder.state !== 'inactive') chunkRecorder.stop();
+  ch.recorder.start();
+  // Cada canal reinicia no seu próprio ciclo.
+  ch.timer = setTimeout(() => {
+    if (ch.recorder && ch.recorder.state !== 'inactive') ch.recorder.stop();
   }, chunkMs);
 }
 
-async function transcribeChunk(blob, startMs, endMs) {
+async function transcribeChunk(blob, speaker, startMs, endMs) {
   try {
     const form = new FormData();
     form.append('audio', blob, `chunk-${Date.now()}.webm`);
@@ -122,7 +169,7 @@ async function transcribeChunk(blob, startMs, endMs) {
     if (!res.ok) throw new Error(`transcribe ${res.status}`);
     const { text } = await res.json();
     if (text && text.trim()) {
-      send({ type: 'TRANSCRIPT_SEGMENT', text: text.trim(), startMs, endMs });
+      send({ type: 'TRANSCRIPT_SEGMENT', text: text.trim(), speaker, startMs, endMs });
     }
   } catch (err) {
     status(`Falha ao transcrever um bloco (${err.message}). Continuando…`);
@@ -130,24 +177,30 @@ async function transcribeChunk(blob, startMs, endMs) {
 }
 
 // --------------------------------------------------------------------------
-// Fim da gravação: sobe o áudio completo e avisa o background.
+// Fim da gravação
 // --------------------------------------------------------------------------
-function stopCapture() {
+async function stopCapture() {
   running = false;
-  if (restartTimer) clearTimeout(restartTimer);
+  if (meterTimer) clearInterval(meterTimer);
+
   if (fullRecorder && fullRecorder.state !== 'inactive') fullRecorder.stop();
-  if (chunkRecorder && chunkRecorder.state !== 'inactive') {
-    chunkRecorder.stop(); // dispara onstop -> último bloco -> finishSession()
-  } else {
-    finishSession();
-  }
+  channels.forEach((ch) => {
+    if (ch.timer) clearTimeout(ch.timer);
+    if (ch.recorder && ch.recorder.state !== 'inactive') ch.recorder.stop();
+    else if (ch.resolveDone) ch.resolveDone();
+  });
+
+  await finishSession();
 }
 
 async function finishSession() {
+  // Espera todos os canais e o gravador completo terminarem.
+  await Promise.all(channels.map((ch) => ch.done));
+
   let audioId = null;
   try {
     status('Salvando áudio…');
-    const blob = await fullDone; // espera o gravador contínuo finalizar
+    const blob = await fullDone;
     if (blob && blob.size > 1200) {
       const form = new FormData();
       form.append('audio', blob, `meeting-${Date.now()}.webm`);
@@ -167,9 +220,9 @@ function cleanup() {
   });
   if (audioContext && audioContext.state !== 'closed') audioContext.close();
   audioContext = mixedStream = tabStream = micStream = null;
-  chunkRecorder = fullRecorder = null;
-  chunkBlobs = [];
+  fullRecorder = null;
   fullBlobs = [];
+  channels = [];
 }
 
 // --------------------------------------------------------------------------
@@ -179,7 +232,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.target !== 'offscreen') return;
 
   if (message.type === 'START_CAPTURE') {
-    startCapture(message.streamId, message.backendUrl, message.chunkMs)
+    startCapture(message.streamId, message)
       .then(() => sendResponse({ ok: true }))
       .catch((err) => {
         cleanup();
@@ -190,8 +243,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'STOP_CAPTURE') {
-    stopCapture();
-    sendResponse({ ok: true });
+    stopCapture().finally(() => sendResponse({ ok: true }));
     return true;
   }
 });

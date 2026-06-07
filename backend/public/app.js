@@ -100,13 +100,26 @@ function renderDetail(m) {
     transcriptEl.innerHTML = '<p style="color:var(--muted)">Sem transcrição.</p>';
   }
   const segEls = [];
+  const speakerColors = {};
+  const palette = ['#6c8cff', '#38d39f', '#ff9f6c', '#c98cff', '#ff6c9f'];
+  const colorFor = (sp) => {
+    if (!sp) return 'var(--muted)';
+    if (!(sp in speakerColors)) {
+      speakerColors[sp] = palette[Object.keys(speakerColors).length % palette.length];
+    }
+    return speakerColors[sp];
+  };
+
   for (const seg of segments) {
     const el = document.createElement('div');
     el.className = 'seg';
     el.dataset.start = seg.startMs || 0;
     el.dataset.end = seg.endMs || 0;
+    const speakerLine = seg.speaker
+      ? `<div class="spk" style="color:${colorFor(seg.speaker)}">${escapeHtml(seg.speaker)}</div>`
+      : '';
     el.innerHTML = `<div class="ts">${fmtTime(seg.startMs)}</div>` +
-      `<div class="txt">${escapeHtml(seg.text)}</div>`;
+      `<div class="txt">${speakerLine}${escapeHtml(seg.text)}</div>`;
     el.addEventListener('click', () => {
       if (!m.audioId) return;
       audio.currentTime = (seg.startMs || 0) / 1000;

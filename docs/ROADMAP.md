@@ -22,7 +22,7 @@ minuto com seek). Armazenado em arquivo JSON + arquivos de áudio no backend.
 - [ ] Detecção de silêncio para não enviar blocos vazios à API.
 
 ### Backend / dados
-- [ ] Trocar o storage em JSON por SQLite ou Postgres.
+- [x] Storage persistente: Postgres (reuniões) + Storage (áudios) via Supabase.
 - [ ] Autenticação (multiusuário) e isolamento de reuniões por usuário.
 - [ ] Webhooks / integrações (Notion, Slack, Google Docs, Monday).
 - [ ] Reprocessar resumo com prompts customizados.

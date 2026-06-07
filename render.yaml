@@ -13,6 +13,12 @@ services:
     envVars:
       - key: OPENAI_API_KEY
         sync: false # você define o valor no painel do Render (secreto)
+      - key: SUPABASE_URL
+        sync: false # Project URL do Supabase
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # service_role key do Supabase (secreta)
+      - key: SUPABASE_BUCKET
+        value: meeting-audio
       - key: NODE_VERSION
         value: "20"
       - key: TRANSCRIBE_MODEL

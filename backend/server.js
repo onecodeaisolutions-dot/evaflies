@@ -4,26 +4,24 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { promises as fs } from 'node:fs';
 
 import { transcribe, summarize, config } from './src/openai.js';
 import {
+  initStore,
   listMeetings,
   getMeeting,
   createMeeting,
   updateMeeting,
 } from './src/store.js';
+import { initAudioStore, saveAudio, serveAudio } from './src/audio-store.js';
+import { storageMode } from './src/storage-config.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
-const AUDIO_DIR = path.join(DATA_DIR, 'audio');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-await fs.mkdir(AUDIO_DIR, { recursive: true });
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
@@ -34,14 +32,10 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
-// Upload do ÁUDIO COMPLETO da reunião: gravado em disco, limite 500MB.
-const audioStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, AUDIO_DIR),
-  filename: (req, file, cb) => cb(null, `${crypto.randomUUID()}.webm`),
-});
+// Upload do ÁUDIO COMPLETO da reunião: em memória (vai para o storage), limite 200MB.
 const uploadAudio = multer({
-  storage: audioStorage,
-  limits: { fileSize: 500 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
 });
 
 // Wrapper para capturar erros de handlers async.
@@ -52,6 +46,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     hasApiKey: Boolean(process.env.OPENAI_API_KEY),
+    storage: storageMode,
     models: config,
   });
 });
@@ -77,17 +72,13 @@ app.post(
   uploadAudio.single('audio'),
   wrap(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Envie um arquivo no campo "audio".' });
-    res.status(201).json({ audioId: path.parse(req.file.filename).name });
+    const audioId = await saveAudio(req.file.buffer, req.file.mimetype || 'audio/webm');
+    res.status(201).json({ audioId });
   })
 );
 
-// Servir o áudio (express.static já dá suporte a Range requests => seek funciona).
-app.use(
-  '/api/audio',
-  express.static(AUDIO_DIR, {
-    setHeaders: (res) => res.set('Accept-Ranges', 'bytes'),
-  })
-);
+// Servir o áudio (local: arquivo com Range; Supabase: redirect para URL assinada).
+app.get('/api/audio/:id', wrap((req, res) => serveAudio(res, req.params.id.replace(/\.webm$/, ''))));
 
 // --- Resumo de uma transcrição -------------------------------------------
 app.post(
@@ -146,8 +137,18 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`EvaFlies backend rodando em http://localhost:${PORT}`);
+  console.log(`EvaFlies backend rodando em http://localhost:${PORT} (storage: ${storageMode})`);
   if (!process.env.OPENAI_API_KEY) {
     console.warn('⚠️  OPENAI_API_KEY não configurada — defina em backend/.env');
   }
 });
+
+// Inicializa o storage em background — não bloqueia o start do servidor.
+(async () => {
+  try {
+    await initAudioStore();
+    await initStore();
+  } catch (err) {
+    console.warn('⚠️  Falha ao inicializar o storage:', err.message);
+  }
+})();

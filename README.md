@@ -52,10 +52,23 @@ Variáveis de ambiente (`.env`):
 | `SUMMARY_MODEL` | `gpt-4o-mini` | Modelo usado para gerar o resumo / action items. |
 | `TRANSCRIBE_LANGUAGE` | `pt` | Idioma esperado da fala (ISO-639-1). |
 | `CORS_ORIGIN` | `*` | Origem permitida para CORS. |
-| `DATA_DIR` | `backend/data` | Onde salvar `meetings.json` e os áudios. Útil para apontar a um disco persistente no deploy. |
+| `SUPABASE_URL` | — | URL do projeto Supabase. Se definido (com a key abaixo), usa Postgres + Storage. |
+| `SUPABASE_SERVICE_ROLE_KEY` | — | service_role key do Supabase (secreta, só no backend). |
+| `SUPABASE_BUCKET` | `meeting-audio` | Bucket do Storage onde ficam os áudios. |
+| `DATA_DIR` | `backend/data` | Modo arquivo local (quando NÃO usar Supabase): onde salvar `meetings.json` e os áudios. |
 
-> **Colocar online:** dá para hospedar o backend no Render (URL `https`) e
-> apontar a extensão para ele. Veja o passo a passo em
+### Armazenamento
+
+- **Sem `SUPABASE_*`** → modo **arquivo local** (em `DATA_DIR`). Bom para
+  desenvolvimento; some se o disco for efêmero.
+- **Com `SUPABASE_*`** → reuniões no **Postgres** e áudios no **Storage** do
+  Supabase. **Persistente** — sobrevive a deploys/hibernação. É o recomendado
+  para o deploy. Crie a tabela rodando
+  [`backend/supabase-schema.sql`](backend/supabase-schema.sql) no SQL Editor do
+  Supabase (o bucket é criado automaticamente).
+
+> **Colocar online:** hospede o backend no Render (URL `https`) com o Supabase
+> como armazenamento e aponte a extensão para ele. Passo a passo completo em
 > [`docs/DEPLOY.md`](docs/DEPLOY.md). O blueprint [`render.yaml`](render.yaml) já
 > deixa quase tudo pronto.
 

@@ -20,7 +20,7 @@ services:
       - key: SUPABASE_BUCKET
         value: meeting-audio
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       - key: TRANSCRIBE_MODEL
         value: gpt-4o-transcribe
       - key: SUMMARY_MODEL

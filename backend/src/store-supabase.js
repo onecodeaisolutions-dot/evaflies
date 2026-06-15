@@ -37,7 +37,7 @@ export async function ping() {
   return true;
 }
 
-export async function listMeetings(ownerId) {
+export async function listMeetings(ownerId, opts = {}) {
   // Não selecionamos a coluna "owner" aqui para manter compatibilidade caso
   // ela ainda não exista; o filtro por dono só roda quando a auth está ligada.
   let query = supabase()
@@ -45,6 +45,13 @@ export async function listMeetings(ownerId) {
     .select('id,title,summary,duration_ms,audio_id,created_at,transcript')
     .order('created_at', { ascending: false });
   if (ownerId) query = query.eq('owner', ownerId);
+  if (opts.from) query = query.gte('created_at', opts.from);
+  if (opts.to) query = query.lte('created_at', opts.to);
+  if (opts.q) {
+    // Remove caracteres que quebram a sintaxe do filtro .or()
+    const safe = opts.q.replace(/[,()%]/g, ' ').trim();
+    if (safe) query = query.or(`title.ilike.%${safe}%,transcript.ilike.%${safe}%`);
+  }
   const { data, error } = await query;
   if (error) throw error;
   return (data || []).map((r) => ({
@@ -100,4 +107,12 @@ export async function updateMeeting(id, patch) {
   const { data, error } = await supabase().from(TABLE).update(row).eq('id', id).select().maybeSingle();
   if (error) throw error;
   return toMeeting(data);
+}
+
+export async function deleteMeeting(id, ownerId) {
+  let query = supabase().from(TABLE).delete().eq('id', id);
+  if (ownerId) query = query.eq('owner', ownerId);
+  const { error } = await query;
+  if (error) throw error;
+  return true;
 }

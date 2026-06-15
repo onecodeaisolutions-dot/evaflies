@@ -3,6 +3,9 @@
 const listEl = document.getElementById('list');
 const detailEl = document.getElementById('detail');
 const searchEl = document.getElementById('search');
+const fromEl = document.getElementById('from');
+const toEl = document.getElementById('to');
+const clearFiltersEl = document.getElementById('clear-filters');
 const tpl = document.getElementById('detail-template');
 
 let meetings = [];
@@ -43,21 +46,24 @@ const escapeHtml = (s) =>
 // Lista
 // --------------------------------------------------------------------------
 async function loadMeetings() {
-  const res = await api('/api/meetings');
+  const params = new URLSearchParams();
+  if (searchEl.value.trim()) params.set('q', searchEl.value.trim());
+  if (fromEl.value) params.set('from', fromEl.value);
+  if (toEl.value) params.set('to', toEl.value);
+  const qs = params.toString();
+  const res = await api(`/api/meetings${qs ? `?${qs}` : ''}`);
   if (res.status === 401) return showLogin();
   meetings = await res.json();
   renderList();
 }
 
 function renderList() {
-  const q = (searchEl.value || '').toLowerCase();
-  const filtered = meetings.filter((m) => m.title.toLowerCase().includes(q));
   listEl.innerHTML = '';
-  if (!filtered.length) {
-    listEl.innerHTML = '<p style="color:var(--muted);padding:10px">Nenhuma reunião.</p>';
+  if (!meetings.length) {
+    listEl.innerHTML = '<p style="color:var(--muted);padding:10px">Nenhuma reunião encontrada.</p>';
     return;
   }
-  for (const m of filtered) {
+  for (const m of meetings) {
     const div = document.createElement('div');
     div.className = 'meeting' + (m.id === activeId ? ' active' : '');
     div.innerHTML =
@@ -95,6 +101,8 @@ function renderDetail(m) {
   node.querySelector('.title').textContent = m.title;
   node.querySelector('.meta').textContent =
     `${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}`;
+  node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
+  node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
 
   const audio = node.querySelector('.player');
   const noAudio = node.querySelector('.no-audio');
@@ -193,6 +201,37 @@ function renderDetail(m) {
   detailEl.appendChild(node);
 }
 
+// --------------------------------------------------------------------------
+// Renomear / Excluir
+// --------------------------------------------------------------------------
+async function renameMeeting(m) {
+  const novo = prompt('Novo título da reunião:', m.title);
+  if (novo == null) return;
+  const title = novo.trim();
+  if (!title || title === m.title) return;
+  const res = await api(`/api/meetings/${m.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) return alert('Não foi possível renomear.');
+  m.title = title;
+  const titleEl = detailEl.querySelector('.title');
+  if (titleEl) titleEl.textContent = title;
+  await loadMeetings();
+}
+
+async function removeMeeting(m) {
+  if (!confirm(`Excluir a reunião "${m.title}"?\nEssa ação não pode ser desfeita.`)) return;
+  const res = await api(`/api/meetings/${m.id}`, { method: 'DELETE' });
+  if (!res.ok) return alert('Não foi possível excluir.');
+  activeId = null;
+  history.replaceState(null, '', location.pathname);
+  detailEl.innerHTML =
+    '<div class="empty"><h1>Reunião excluída</h1><p>Selecione outra reunião à esquerda.</p></div>';
+  await loadMeetings();
+}
+
 // MediaRecorder gera webm sem duração no cabeçalho => força o Chrome a calcular,
 // senão a barra de progresso fica "Infinity" e o seek não funciona.
 function fixWebmDuration(audio) {
@@ -257,7 +296,19 @@ loginKeyEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin()
 // --------------------------------------------------------------------------
 // Init
 // --------------------------------------------------------------------------
-searchEl.addEventListener('input', renderList);
+let searchTimer;
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadMeetings, 300);
+});
+fromEl.addEventListener('change', loadMeetings);
+toEl.addEventListener('change', loadMeetings);
+clearFiltersEl.addEventListener('click', () => {
+  searchEl.value = '';
+  fromEl.value = '';
+  toEl.value = '';
+  loadMeetings();
+});
 
 async function start() {
   const meRes = await api('/api/me');

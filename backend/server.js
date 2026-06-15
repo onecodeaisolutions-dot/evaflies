@@ -14,8 +14,9 @@ import {
   getMeeting,
   createMeeting,
   updateMeeting,
+  deleteMeeting,
 } from './src/store.js';
-import { initAudioStore, saveAudio, serveAudio } from './src/audio-store.js';
+import { initAudioStore, saveAudio, serveAudio, deleteAudio } from './src/audio-store.js';
 import { storageMode } from './src/storage-config.js';
 import { requireUser, ownerFilter, authEnabled } from './src/auth.js';
 
@@ -112,7 +113,13 @@ app.post(
 
 // --- Reuniões -------------------------------------------------------------
 app.get('/api/meetings', requireUser, wrap(async (req, res) => {
-  res.json(await listMeetings(ownerFilter(req)));
+  const { q, from, to } = req.query;
+  const opts = {
+    q: (q || '').trim() || null,
+    from: from ? new Date(`${from}T00:00:00`).toISOString() : null,
+    to: to ? new Date(`${to}T23:59:59.999`).toISOString() : null,
+  };
+  res.json(await listMeetings(ownerFilter(req), opts));
 }));
 
 app.get('/api/meetings/:id', requireUser, wrap(async (req, res) => {
@@ -142,8 +149,22 @@ app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
   // Garante que o usuário só altera reuniões que pode ver.
   const existing = await getMeeting(req.params.id, ownerFilter(req));
   if (!existing) return res.status(404).json({ error: 'Reunião não encontrada.' });
-  const updated = await updateMeeting(req.params.id, req.body || {});
+  // Só permitimos renomear (título) por aqui.
+  const patch = {};
+  if (typeof req.body?.title === 'string') patch.title = req.body.title.trim() || existing.title;
+  const updated = await updateMeeting(req.params.id, patch);
   res.json(updated);
+}));
+
+app.delete('/api/meetings/:id', requireUser, wrap(async (req, res) => {
+  const owner = ownerFilter(req);
+  const meeting = await getMeeting(req.params.id, owner);
+  if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+  if (meeting.audioId) {
+    try { await deleteAudio(meeting.audioId); } catch (err) { console.error('Falha ao apagar áudio:', err.message); }
+  }
+  await deleteMeeting(req.params.id, owner);
+  res.json({ ok: true });
 }));
 
 // --- Painel web (dashboard estilo Fireflies) ------------------------------

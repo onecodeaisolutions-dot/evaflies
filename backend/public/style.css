@@ -46,6 +46,28 @@ body {
   width: 100%; padding: 9px 12px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
 }
+.filters { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.filters input[type="date"] {
+  flex: 1; min-width: 0; padding: 6px 8px; border-radius: 7px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--text); color-scheme: dark;
+}
+.filters-sep { color: var(--muted); font-size: 12px; }
+#clear-filters {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 7px; padding: 6px 9px; cursor: pointer; font-size: 12px;
+}
+#clear-filters:hover { border-color: var(--accent); color: var(--text); }
+
+/* Ações do detalhe (renomear / excluir) */
+.detail-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.detail-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.btn-rename, .btn-delete {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: 13px; white-space: nowrap;
+}
+.btn-rename:hover { border-color: var(--accent); }
+.btn-delete:hover { border-color: var(--danger); color: var(--danger); }
 .list { overflow-y: auto; flex: 1; padding: 6px 10px 16px; }
 
 .meeting {

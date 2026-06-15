@@ -39,6 +39,17 @@ export async function saveAudio(buffer, contentType = 'audio/webm') {
   return id;
 }
 
+/** Remove o áudio de uma reunião (ao excluí-la). */
+export async function deleteAudio(id) {
+  const sid = safeId(id);
+  if (!sid) return;
+  if (useSupabase) {
+    await supabase().storage.from(SUPABASE_BUCKET).remove([`${sid}.webm`]);
+  } else {
+    await fs.rm(path.join(AUDIO_DIR, `${sid}.webm`), { force: true });
+  }
+}
+
 /** Responde com o áudio (redirect para URL assinada no Supabase, ou arquivo local com Range). */
 export async function serveAudio(res, id) {
   const sid = safeId(id);

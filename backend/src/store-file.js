@@ -44,11 +44,18 @@ export async function ping() {
 }
 
 /** Lista as reuniões (mais recentes primeiro), sem o transcript completo.
- *  ownerId: se informado, retorna só as reuniões desse dono. */
-export async function listMeetings(ownerId) {
+ *  ownerId: filtra por dono. opts: { q, from, to } para busca e período. */
+export async function listMeetings(ownerId, opts = {}) {
   const meetings = await readAll();
+  const q = (opts.q || '').toLowerCase();
   return meetings
     .filter((m) => !ownerId || m.owner === ownerId)
+    .filter((m) => !opts.from || m.createdAt >= opts.from)
+    .filter((m) => !opts.to || m.createdAt <= opts.to)
+    .filter((m) =>
+      !q ||
+      (m.title || '').toLowerCase().includes(q) ||
+      (m.transcript || '').toLowerCase().includes(q))
     .map(({ transcript, segments, ...rest }) => ({
       ...rest,
       hasAudio: Boolean(rest.audioId),
@@ -92,4 +99,14 @@ export async function updateMeeting(id, patch) {
   meetings[idx] = { ...meetings[idx], ...patch, id };
   await writeAll(meetings);
   return meetings[idx];
+}
+
+/** Exclui uma reunião (respeitando o dono). Retorna a removida ou null. */
+export async function deleteMeeting(id, ownerId) {
+  const meetings = await readAll();
+  const idx = meetings.findIndex((m) => m.id === id && (!ownerId || m.owner === ownerId));
+  if (idx === -1) return null;
+  const [removed] = meetings.splice(idx, 1);
+  await writeAll(meetings);
+  return removed;
 }

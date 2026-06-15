@@ -11,10 +11,15 @@ create table if not exists public.meetings (
   summary     jsonb,                                 -- {summary, action_items, topics}
   duration_ms bigint not null default 0,
   audio_id    text,                                  -- nome do arquivo no Storage
+  owner       text,                                  -- dono da reunião (separação por vendedor)
   created_at  timestamptz not null default now()
 );
 
+-- Se a tabela já existir (criada antes), adiciona a coluna owner:
+alter table public.meetings add column if not exists owner text;
+
 create index if not exists meetings_created_at_idx on public.meetings (created_at desc);
+create index if not exists meetings_owner_idx on public.meetings (owner);
 
 -- O bucket de áudio ("meeting-audio") é criado automaticamente pelo backend na
 -- inicialização. Se preferir criar manualmente: Storage -> New bucket ->

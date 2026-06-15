@@ -9,6 +9,8 @@ export const DEFAULTS = {
   userName: 'Você',
   // Nome para o canal da aba (demais participantes da reunião).
   othersName: 'Participantes',
+  // Código de acesso do vendedor (separa as reuniões por usuário no painel).
+  accessKey: '',
 };
 
 const STORAGE_KEY = 'evaflies_settings';

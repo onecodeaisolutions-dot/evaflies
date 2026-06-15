@@ -29,6 +29,10 @@ services:
         value: pt
       - key: CORS_ORIGIN
         value: "*"
+      # Separação por vendedor. Deixe vazio para auth desligada. Defina no painel
+      # do Render com o JSON dos usuários quando for ativar (ver .env.example).
+      - key: EVA_USERS
+        sync: false
       # Para PERSISTIR reuniões e áudios entre deploys, use um disco (plano pago):
       # - key: DATA_DIR
       #   value: /var/data

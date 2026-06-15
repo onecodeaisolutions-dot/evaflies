@@ -16,6 +16,7 @@ const els = {
   settingsToggle: $('settingsToggle'),
   backendUrl: $('backendUrl'),
   userName: $('userName'),
+  accessKey: $('accessKey'),
   saveSettings: $('saveSettings'),
   checkHealth: $('checkHealth'),
   grantMic: $('grantMic'),
@@ -106,7 +107,8 @@ els.settingsToggle.addEventListener('click', () => {
 els.saveSettings.addEventListener('click', async () => {
   const url = els.backendUrl.value.trim().replace(/\/$/, '');
   const userName = els.userName.value.trim() || 'Você';
-  settings = await saveSettings({ backendUrl: url, userName });
+  const accessKey = els.accessKey.value.trim();
+  settings = await saveSettings({ backendUrl: url, userName, accessKey });
   els.settingsStatus.textContent = 'Configurações salvas.';
   els.settingsStatus.className = 'muted ok';
 });
@@ -213,5 +215,6 @@ setInterval(() => {
   settings = await getSettings();
   els.backendUrl.value = settings.backendUrl;
   els.userName.value = settings.userName || 'Você';
+  els.accessKey.value = settings.accessKey || '';
   await refresh();
 })();

@@ -6,6 +6,7 @@
   --muted: #8b93ad;
   --accent: #6c8cff;
   --ok: #38d39f;
+  --danger: #ff5b6e;
   --border: #2a3152;
 }
 
@@ -105,5 +106,40 @@ body {
   border-radius: 999px; padding: 4px 12px; font-size: 12px; color: var(--muted);
 }
 h3 { margin: 20px 0 6px; font-size: 14px; }
+
+/* Barra de usuário ------------------------------------------------------- */
+.userbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--muted);
+}
+.u-logout {
+  background: none; border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+}
+.u-logout:hover { border-color: var(--accent); }
+
+/* Login ------------------------------------------------------------------ */
+.login-overlay {
+  position: fixed; inset: 0; background: rgba(10, 12, 22, 0.92);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.login-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 32px; width: 320px; text-align: center;
+}
+.login-box h1 { margin: 0 0 4px; }
+.login-box p { color: var(--muted); font-size: 14px; }
+.login-box input {
+  width: 100%; padding: 10px 12px; margin: 14px 0 10px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 14px;
+}
+.login-box button {
+  width: 100%; padding: 11px; background: var(--accent); color: #fff;
+  border: none; border-radius: 9px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.login-box button:hover { filter: brightness(1.08); }
+.login-error { color: var(--danger); min-height: 18px; margin-top: 8px; }
 
 .hidden { display: none; }

@@ -37,10 +37,12 @@ export async function initStore() {
   await ensureFile();
 }
 
-/** Lista as reuniões (mais recentes primeiro), sem o transcript completo. */
-export async function listMeetings() {
+/** Lista as reuniões (mais recentes primeiro), sem o transcript completo.
+ *  ownerId: se informado, retorna só as reuniões desse dono. */
+export async function listMeetings(ownerId) {
   const meetings = await readAll();
   return meetings
+    .filter((m) => !ownerId || m.owner === ownerId)
     .map(({ transcript, segments, ...rest }) => ({
       ...rest,
       hasAudio: Boolean(rest.audioId),
@@ -49,14 +51,16 @@ export async function listMeetings() {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
-/** Retorna uma reunião completa pelo id. */
-export async function getMeeting(id) {
+/** Retorna uma reunião completa pelo id (respeitando o dono, se informado). */
+export async function getMeeting(id, ownerId) {
   const meetings = await readAll();
-  return meetings.find((m) => m.id === id) || null;
+  const m = meetings.find((x) => x.id === id) || null;
+  if (m && ownerId && m.owner !== ownerId) return null;
+  return m;
 }
 
 /** Cria uma reunião. */
-export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId }) {
+export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner }) {
   const meetings = await readAll();
   const meeting = {
     id: crypto.randomUUID(),
@@ -66,6 +70,7 @@ export async function createMeeting({ title, transcript, segments, summary, dura
     summary: summary || null,
     durationMs: durationMs || 0,
     audioId: audioId || null,
+    owner: owner || null,
     createdAt: new Date().toISOString(),
   };
   meetings.push(meeting);

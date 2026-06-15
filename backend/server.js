@@ -16,6 +16,7 @@ import {
 } from './src/store.js';
 import { initAudioStore, saveAudio, serveAudio } from './src/audio-store.js';
 import { storageMode } from './src/storage-config.js';
+import { requireUser, ownerFilter, authEnabled } from './src/auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,13 +48,20 @@ app.get('/api/health', (req, res) => {
     ok: true,
     hasApiKey: Boolean(process.env.OPENAI_API_KEY),
     storage: storageMode,
+    auth: authEnabled,
     models: config,
   });
+});
+
+// Quem sou eu? Usado pelo painel para saber se precisa de login.
+app.get('/api/me', requireUser, (req, res) => {
+  res.json({ authEnabled, user: req.user });
 });
 
 // --- Transcrição de um bloco ---------------------------------------------
 app.post(
   '/api/transcribe',
+  requireUser,
   upload.single('audio'),
   wrap(async (req, res) => {
     if (!req.file) {
@@ -69,6 +77,7 @@ app.post(
 // Upload do áudio gravado (devolve um audioId para vincular à reunião).
 app.post(
   '/api/audio',
+  requireUser,
   uploadAudio.single('audio'),
   wrap(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Envie um arquivo no campo "audio".' });
@@ -78,7 +87,8 @@ app.post(
 );
 
 // Servir o áudio (local: arquivo com Range; Supabase: redirect para URL assinada).
-app.get('/api/audio/:id', wrap((req, res) => serveAudio(res, req.params.id.replace(/\.webm$/, ''))));
+// O <audio> não envia headers, então a chave pode vir por ?key= (tratada em requireUser).
+app.get('/api/audio/:id', requireUser, wrap((req, res) => serveAudio(res, req.params.id.replace(/\.webm$/, ''))));
 
 // --- Resumo de uma transcrição -------------------------------------------
 app.post(
@@ -94,17 +104,17 @@ app.post(
 );
 
 // --- Reuniões -------------------------------------------------------------
-app.get('/api/meetings', wrap(async (req, res) => {
-  res.json(await listMeetings());
+app.get('/api/meetings', requireUser, wrap(async (req, res) => {
+  res.json(await listMeetings(ownerFilter(req)));
 }));
 
-app.get('/api/meetings/:id', wrap(async (req, res) => {
-  const meeting = await getMeeting(req.params.id);
+app.get('/api/meetings/:id', requireUser, wrap(async (req, res) => {
+  const meeting = await getMeeting(req.params.id, ownerFilter(req));
   if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
   res.json(meeting);
 }));
 
-app.post('/api/meetings', wrap(async (req, res) => {
+app.post('/api/meetings', requireUser, wrap(async (req, res) => {
   const { title, transcript, segments, durationMs, audioId, summarize: doSummarize } = req.body || {};
 
   let summary = null;
@@ -116,13 +126,16 @@ app.post('/api/meetings', wrap(async (req, res) => {
     }
   }
 
-  const meeting = await createMeeting({ title, transcript, segments, summary, durationMs, audioId });
+  const owner = req.user ? req.user.id : null;
+  const meeting = await createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner });
   res.status(201).json(meeting);
 }));
 
-app.patch('/api/meetings/:id', wrap(async (req, res) => {
+app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
+  // Garante que o usuário só altera reuniões que pode ver.
+  const existing = await getMeeting(req.params.id, ownerFilter(req));
+  if (!existing) return res.status(404).json({ error: 'Reunião não encontrada.' });
   const updated = await updateMeeting(req.params.id, req.body || {});
-  if (!updated) return res.status(404).json({ error: 'Reunião não encontrada.' });
   res.json(updated);
 }));
 

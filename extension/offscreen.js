@@ -23,6 +23,10 @@ let meterTimer = null;
 let sessionStartMs = 0;
 let backendUrl = '';
 let chunkMs = 20000;
+let accessKey = '';
+
+// Headers com o código de acesso (quando houver).
+const authHeaders = () => (accessKey ? { 'x-eva-key': accessKey } : {});
 
 function send(message) {
   chrome.runtime.sendMessage({ target: 'background', ...message }).catch(() => {});
@@ -39,6 +43,7 @@ const pickMime = () =>
 async function startCapture(streamId, opts) {
   backendUrl = opts.backendUrl;
   chunkMs = opts.chunkMs || 20000;
+  accessKey = opts.accessKey || '';
 
   // 1) Áudio da aba.
   tabStream = await navigator.mediaDevices.getUserMedia({
@@ -165,7 +170,7 @@ async function transcribeChunk(blob, speaker, startMs, endMs) {
   try {
     const form = new FormData();
     form.append('audio', blob, `chunk-${Date.now()}.webm`);
-    const res = await fetch(`${backendUrl}/api/transcribe`, { method: 'POST', body: form });
+    const res = await fetch(`${backendUrl}/api/transcribe`, { method: 'POST', body: form, headers: authHeaders() });
     if (!res.ok) throw new Error(`transcribe ${res.status}`);
     const { text } = await res.json();
     if (text && text.trim()) {
@@ -204,7 +209,7 @@ async function finishSession() {
     if (blob && blob.size > 1200) {
       const form = new FormData();
       form.append('audio', blob, `meeting-${Date.now()}.webm`);
-      const res = await fetch(`${backendUrl}/api/audio`, { method: 'POST', body: form });
+      const res = await fetch(`${backendUrl}/api/audio`, { method: 'POST', body: form, headers: authHeaders() });
       if (res.ok) ({ audioId } = await res.json());
     }
   } catch (err) {

@@ -9,6 +9,7 @@
   <body>
     <aside class="sidebar">
       <div class="brand">🎙️ <span>EvaFlies</span></div>
+      <div id="userbar" class="userbar hidden"></div>
       <div class="sidebar-head">
         <h2>Reuniões</h2>
         <input id="search" type="text" placeholder="Buscar por título…" />
@@ -49,6 +50,16 @@
         <div class="topics"></div>
       </section>
     </template>
+
+    <div id="login" class="login-overlay hidden">
+      <div class="login-box">
+        <h1>🎙️ EvaFlies</h1>
+        <p>Digite seu código de acesso para ver suas reuniões.</p>
+        <input id="login-key" type="password" placeholder="Código de acesso" />
+        <button id="login-btn">Entrar</button>
+        <p id="login-error" class="login-error"></p>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>

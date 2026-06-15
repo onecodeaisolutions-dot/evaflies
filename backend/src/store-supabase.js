@@ -14,6 +14,7 @@ function toMeeting(row) {
     summary: row.summary || null,
     durationMs: row.duration_ms || 0,
     audioId: row.audio_id || null,
+    owner: row.owner || null,
     createdAt: row.created_at,
   };
 }
@@ -29,11 +30,15 @@ export async function initStore() {
   }
 }
 
-export async function listMeetings() {
-  const { data, error } = await supabase()
+export async function listMeetings(ownerId) {
+  // Não selecionamos a coluna "owner" aqui para manter compatibilidade caso
+  // ela ainda não exista; o filtro por dono só roda quando a auth está ligada.
+  let query = supabase()
     .from(TABLE)
     .select('id,title,summary,duration_ms,audio_id,created_at,transcript')
     .order('created_at', { ascending: false });
+  if (ownerId) query = query.eq('owner', ownerId);
+  const { data, error } = await query;
   if (error) throw error;
   return (data || []).map((r) => ({
     id: r.id,
@@ -47,13 +52,15 @@ export async function listMeetings() {
   }));
 }
 
-export async function getMeeting(id) {
-  const { data, error } = await supabase().from(TABLE).select('*').eq('id', id).maybeSingle();
+export async function getMeeting(id, ownerId) {
+  let query = supabase().from(TABLE).select('*').eq('id', id);
+  if (ownerId) query = query.eq('owner', ownerId);
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return toMeeting(data);
 }
 
-export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId }) {
+export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner }) {
   const row = {
     title: title || `Reunião ${new Date().toLocaleString('pt-BR')}`,
     transcript: transcript || '',
@@ -62,6 +69,8 @@ export async function createMeeting({ title, transcript, segments, summary, dura
     duration_ms: durationMs || 0,
     audio_id: audioId || null,
   };
+  // Só inclui "owner" quando houver — assim funciona mesmo antes de criar a coluna.
+  if (owner) row.owner = owner;
   const { data, error } = await supabase().from(TABLE).insert(row).select().single();
   if (error) throw error;
   return toMeeting(data);

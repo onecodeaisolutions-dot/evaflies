@@ -95,6 +95,7 @@ async function startRecording() {
     chunkMs: settings.chunkMs,
     userName: settings.userName,
     othersName: settings.othersName,
+    accessKey: settings.accessKey,
   }).catch(() => {});
 
   broadcast({ type: 'SESSION_UPDATE' });
@@ -127,9 +128,11 @@ async function finalize() {
 
   try {
     const settings = await getSettings();
+    const headers = { 'Content-Type': 'application/json' };
+    if (settings.accessKey) headers['x-eva-key'] = settings.accessKey;
     const res = await fetch(`${settings.backendUrl}/api/meetings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         title: session.tabTitle,
         transcript,

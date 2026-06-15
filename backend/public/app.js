@@ -7,6 +7,20 @@ const tpl = document.getElementById('detail-template');
 
 let meetings = [];
 let activeId = null;
+let accessKey = localStorage.getItem('eva_key') || '';
+
+// fetch que inclui o código de acesso (quando houver).
+function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (accessKey) headers['x-eva-key'] = accessKey;
+  return fetch(path, { ...opts, headers });
+}
+
+// URL do áudio com a chave por query (o <audio> não envia headers).
+function audioUrl(audioId) {
+  const base = `/api/audio/${audioId}.webm`;
+  return accessKey ? `${base}?key=${encodeURIComponent(accessKey)}` : base;
+}
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -29,7 +43,8 @@ const escapeHtml = (s) =>
 // Lista
 // --------------------------------------------------------------------------
 async function loadMeetings() {
-  const res = await fetch('/api/meetings');
+  const res = await api('/api/meetings');
+  if (res.status === 401) return showLogin();
   meetings = await res.json();
   renderList();
 }
@@ -63,7 +78,8 @@ async function openMeeting(id) {
   renderList();
   history.replaceState(null, '', `?id=${id}`);
 
-  const res = await fetch(`/api/meetings/${id}`);
+  const res = await api(`/api/meetings/${id}`);
+  if (res.status === 401) return showLogin();
   if (!res.ok) {
     detailEl.innerHTML = '<div class="empty"><h1>Reunião não encontrada</h1></div>';
     return;
@@ -83,7 +99,7 @@ function renderDetail(m) {
   const audio = node.querySelector('.player');
   const noAudio = node.querySelector('.no-audio');
   if (m.audioId) {
-    audio.src = `/api/audio/${m.audioId}.webm`;
+    audio.src = audioUrl(m.audioId);
     fixWebmDuration(audio);
   } else {
     audio.classList.add('hidden');
@@ -194,12 +210,63 @@ function fixWebmDuration(audio) {
 }
 
 // --------------------------------------------------------------------------
+// Login / usuário
+// --------------------------------------------------------------------------
+const loginEl = document.getElementById('login');
+const loginKeyEl = document.getElementById('login-key');
+const loginBtn = document.getElementById('login-btn');
+const loginError = document.getElementById('login-error');
+const userbarEl = document.getElementById('userbar');
+
+function showLogin(message) {
+  loginEl.classList.remove('hidden');
+  loginError.textContent = message || '';
+  loginKeyEl.focus();
+}
+
+function renderUserbar(user) {
+  userbarEl.classList.remove('hidden');
+  userbarEl.innerHTML =
+    `<span class="u-name">👤 ${escapeHtml(user.name)}${user.admin ? ' (admin)' : ''}</span>` +
+    `<button id="logout" class="u-logout">Sair</button>`;
+  document.getElementById('logout').addEventListener('click', () => {
+    localStorage.removeItem('eva_key');
+    accessKey = '';
+    location.reload();
+  });
+}
+
+async function doLogin() {
+  const key = loginKeyEl.value.trim();
+  if (!key) return;
+  loginError.textContent = 'Entrando…';
+  const res = await fetch('/api/me', { headers: { 'x-eva-key': key } });
+  if (res.status === 401) {
+    loginError.textContent = 'Código inválido. Tente novamente.';
+    return;
+  }
+  localStorage.setItem('eva_key', key);
+  accessKey = key;
+  loginEl.classList.add('hidden');
+  start();
+}
+
+loginBtn.addEventListener('click', doLogin);
+loginKeyEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// --------------------------------------------------------------------------
 // Init
 // --------------------------------------------------------------------------
 searchEl.addEventListener('input', renderList);
 
-(async () => {
+async function start() {
+  const meRes = await api('/api/me');
+  if (meRes.status === 401) return showLogin();
+  const me = await meRes.json();
+  if (me.authEnabled && me.user) renderUserbar(me.user);
   await loadMeetings();
   const id = new URLSearchParams(location.search).get('id');
   if (id) openMeeting(id);
-})();
+}
+
+start();

@@ -66,3 +66,19 @@ export function ownerFilter(req) {
   if (!req.user || req.user.admin) return null;
   return req.user.id;
 }
+
+// Filtro para a LISTAGEM: vendedor vê só as suas; admin pode filtrar por ?owner.
+export function listOwnerFilter(req) {
+  if (!req.user) return null; // auth desligada
+  if (!req.user.admin) return req.user.id; // vendedor: forçado às suas
+  return (req.query.owner || '').trim() || null; // admin: por vendedor ou todas
+}
+
+// Lista de usuários (sem as chaves) para o admin montar o menu de vendedores.
+export function listUsers() {
+  return users.map((u) => ({
+    id: ownerIdOf(u),
+    name: u.name || u.email || 'Usuário',
+    admin: Boolean(u.admin),
+  }));
+}

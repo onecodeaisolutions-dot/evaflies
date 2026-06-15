@@ -18,7 +18,7 @@ import {
 } from './src/store.js';
 import { initAudioStore, saveAudio, serveAudio, deleteAudio } from './src/audio-store.js';
 import { storageMode } from './src/storage-config.js';
-import { requireUser, ownerFilter, authEnabled } from './src/auth.js';
+import { requireUser, ownerFilter, listOwnerFilter, listUsers, authEnabled } from './src/auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -64,6 +64,12 @@ app.get('/api/ping', wrap(async (req, res) => {
 // Quem sou eu? Usado pelo painel para saber se precisa de login.
 app.get('/api/me', requireUser, (req, res) => {
   res.json({ authEnabled, user: req.user });
+});
+
+// Lista de vendedores (apenas admin) — alimenta o menu de filtro no painel.
+app.get('/api/users', requireUser, (req, res) => {
+  if (!req.user || !req.user.admin) return res.status(403).json({ error: 'Apenas admin.' });
+  res.json(listUsers());
 });
 
 // --- Transcrição de um bloco ---------------------------------------------
@@ -119,7 +125,7 @@ app.get('/api/meetings', requireUser, wrap(async (req, res) => {
     from: from ? new Date(`${from}T00:00:00`).toISOString() : null,
     to: to ? new Date(`${to}T23:59:59.999`).toISOString() : null,
   };
-  res.json(await listMeetings(ownerFilter(req), opts));
+  res.json(await listMeetings(listOwnerFilter(req), opts));
 }));
 
 app.get('/api/meetings/:id', requireUser, wrap(async (req, res) => {

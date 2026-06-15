@@ -42,7 +42,7 @@ export async function listMeetings(ownerId, opts = {}) {
   // ela ainda não exista; o filtro por dono só roda quando a auth está ligada.
   let query = supabase()
     .from(TABLE)
-    .select('id,title,summary,duration_ms,audio_id,created_at,transcript')
+    .select('id,title,summary,duration_ms,audio_id,created_at,transcript,owner')
     .order('created_at', { ascending: false });
   if (ownerId) query = query.eq('owner', ownerId);
   if (opts.from) query = query.gte('created_at', opts.from);
@@ -60,6 +60,7 @@ export async function listMeetings(ownerId, opts = {}) {
     summary: r.summary || null,
     durationMs: r.duration_ms || 0,
     audioId: r.audio_id || null,
+    owner: r.owner || null,
     createdAt: r.created_at,
     hasAudio: Boolean(r.audio_id),
     transcriptPreview: (r.transcript || '').slice(0, 200),

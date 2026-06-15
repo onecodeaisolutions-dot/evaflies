@@ -46,6 +46,15 @@ body {
   width: 100%; padding: 9px 12px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
 }
+.owner-filter {
+  width: 100%; margin-bottom: 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  font-size: 13px; cursor: pointer; color-scheme: dark;
+}
+.owner-badge {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--accent);
+  border-radius: 999px; padding: 1px 8px; font-size: 11px;
+}
 .filters { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .filters input[type="date"] {
   flex: 1; min-width: 0; padding: 6px 8px; border-radius: 7px; font-size: 12px;

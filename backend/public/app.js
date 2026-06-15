@@ -6,10 +6,12 @@ const searchEl = document.getElementById('search');
 const fromEl = document.getElementById('from');
 const toEl = document.getElementById('to');
 const clearFiltersEl = document.getElementById('clear-filters');
+const ownerFilterEl = document.getElementById('owner-filter');
 const tpl = document.getElementById('detail-template');
 
 let meetings = [];
 let activeId = null;
+let isAdmin = false;
 let accessKey = localStorage.getItem('eva_key') || '';
 let playbackSpeed = parseFloat(localStorage.getItem('eva_speed')) || 1;
 
@@ -51,6 +53,7 @@ async function loadMeetings() {
   if (searchEl.value.trim()) params.set('q', searchEl.value.trim());
   if (fromEl.value) params.set('from', fromEl.value);
   if (toEl.value) params.set('to', toEl.value);
+  if (isAdmin && ownerFilterEl.value) params.set('owner', ownerFilterEl.value);
   const qs = params.toString();
   const res = await api(`/api/meetings${qs ? `?${qs}` : ''}`);
   if (res.status === 401) return showLogin();
@@ -71,7 +74,9 @@ function renderList() {
       `<div class="m-title">${escapeHtml(m.title)}</div>` +
       `<div class="m-sub"><span>${fmtDate(m.createdAt)}</span>` +
       `<span>${fmtDur(m.durationMs)}</span>` +
-      (m.hasAudio ? '<span>🎧</span>' : '') + '</div>';
+      (m.hasAudio ? '<span>🎧</span>' : '') +
+      (isAdmin && m.owner ? `<span class="owner-badge">${escapeHtml(m.owner)}</span>` : '') +
+      '</div>';
     div.addEventListener('click', () => openMeeting(m.id));
     listEl.appendChild(div);
   }
@@ -101,7 +106,8 @@ function renderDetail(m) {
 
   node.querySelector('.title').textContent = m.title;
   node.querySelector('.meta').textContent =
-    `${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}`;
+    `${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}` +
+    (isAdmin && m.owner ? ` · 👤 ${m.owner}` : '');
   node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
   node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
 
@@ -318,6 +324,7 @@ searchEl.addEventListener('input', () => {
 });
 fromEl.addEventListener('change', loadMeetings);
 toEl.addEventListener('change', loadMeetings);
+ownerFilterEl.addEventListener('change', loadMeetings);
 clearFiltersEl.addEventListener('click', () => {
   searchEl.value = '';
   fromEl.value = '';
@@ -325,11 +332,32 @@ clearFiltersEl.addEventListener('click', () => {
   loadMeetings();
 });
 
+// Monta o menu de vendedores (admin).
+async function populateOwners() {
+  const res = await api('/api/users');
+  if (!res.ok) return;
+  const users = await res.json();
+  ownerFilterEl.innerHTML = '';
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = 'Todos os vendedores';
+  ownerFilterEl.appendChild(all);
+  for (const u of users) {
+    const o = document.createElement('option');
+    o.value = u.id;
+    o.textContent = u.name + (u.admin ? ' (admin)' : '');
+    ownerFilterEl.appendChild(o);
+  }
+  ownerFilterEl.classList.remove('hidden');
+}
+
 async function start() {
   const meRes = await api('/api/me');
   if (meRes.status === 401) return showLogin();
   const me = await meRes.json();
+  isAdmin = Boolean(me.user && me.user.admin);
   if (me.authEnabled && me.user) renderUserbar(me.user);
+  if (isAdmin) await populateOwners();
   await loadMeetings();
   const id = new URLSearchParams(location.search).get('id');
   if (id) openMeeting(id);

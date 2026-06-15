@@ -11,6 +11,7 @@ const tpl = document.getElementById('detail-template');
 let meetings = [];
 let activeId = null;
 let accessKey = localStorage.getItem('eva_key') || '';
+let playbackSpeed = parseFloat(localStorage.getItem('eva_speed')) || 1;
 
 // fetch que inclui o código de acesso (quando houver).
 function api(path, opts = {}) {
@@ -106,11 +107,25 @@ function renderDetail(m) {
 
   const audio = node.querySelector('.player');
   const noAudio = node.querySelector('.no-audio');
+  const speedEl = node.querySelector('.speed');
   if (m.audioId) {
     audio.src = audioUrl(m.audioId);
+    audio.playbackRate = playbackSpeed;
     fixWebmDuration(audio);
+    const btns = speedEl.querySelectorAll('.speed-btn');
+    const markActive = () =>
+      btns.forEach((b) => b.classList.toggle('active', parseFloat(b.dataset.speed) === playbackSpeed));
+    markActive();
+    btns.forEach((b) =>
+      b.addEventListener('click', () => {
+        playbackSpeed = parseFloat(b.dataset.speed);
+        localStorage.setItem('eva_speed', String(playbackSpeed));
+        audio.playbackRate = playbackSpeed;
+        markActive();
+      }));
   } else {
     audio.classList.add('hidden');
+    speedEl.classList.add('hidden');
     noAudio.classList.remove('hidden');
   }
 

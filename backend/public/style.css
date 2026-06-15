@@ -91,8 +91,18 @@ body {
 .detail-head h1 { margin: 0 0 6px; font-size: 24px; }
 .detail-head .meta { color: var(--muted); font-size: 13px; }
 
-.player { width: 100%; margin: 18px 0 6px; }
+.player { width: 100%; margin: 18px 0 8px; }
 .no-audio { color: var(--muted); }
+
+.speed { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; flex-wrap: wrap; }
+.speed-label { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.speed-btn {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 4px 9px; cursor: pointer; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.speed-btn:hover { border-color: var(--accent); }
+.speed-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .tabs { display: flex; gap: 8px; margin: 18px 0 12px; border-bottom: 1px solid var(--border); }
 .tab {

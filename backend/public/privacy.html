@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EvaFlies — Política de Privacidade</title>
+    <style>
+      body { max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; line-height: 1.6; color: #1a1a1a; }
+      h1 { font-size: 26px; } h2 { font-size: 18px; margin-top: 28px; }
+      code { background: #f0f0f3; padding: 1px 5px; border-radius: 4px; }
+      .muted { color: #666; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Política de Privacidade — EvaFlies</h1>
+    <p class="muted">Última atualização: 2026.</p>
+
+    <p>
+      O EvaFlies é uma extensão do Google Chrome que grava o áudio de reuniões e
+      gera transcrição e resumo, para uso interno da equipe que a instala.
+    </p>
+
+    <h2>Quais dados são tratados</h2>
+    <ul>
+      <li><strong>Áudio da reunião</strong>: áudio da aba do navegador e do seu
+        microfone, capturados apenas enquanto você clica em "Gravar".</li>
+      <li><strong>Transcrição e resumo</strong> gerados a partir desse áudio.</li>
+      <li><strong>Configurações locais</strong> (ex: seu nome e a URL do servidor),
+        guardadas no armazenamento da própria extensão.</li>
+    </ul>
+
+    <h2>Como os dados são usados e armazenados</h2>
+    <ul>
+      <li>O áudio é enviado ao <strong>servidor próprio da organização</strong> que
+        opera o EvaFlies, que o encaminha à <strong>OpenAI</strong> apenas para
+        gerar a transcrição e o resumo.</li>
+      <li>A reunião (áudio + transcrição + resumo) é armazenada no banco de dados e
+        no storage controlados pela organização (Supabase).</li>
+      <li>Os dados <strong>não são vendidos</strong> nem usados para publicidade.</li>
+    </ul>
+
+    <h2>Gravação com consentimento</h2>
+    <p>
+      Grave reuniões apenas com o consentimento dos participantes, conforme as leis
+      de privacidade aplicáveis. O responsável pela gravação é o usuário que a inicia.
+    </p>
+
+    <h2>Permissões da extensão</h2>
+    <p>
+      A extensão usa <code>tabCapture</code> e o microfone para gravar o áudio,
+      <code>storage</code> para guardar configurações e acesso ao servidor do
+      EvaFlies para transcrever e salvar as reuniões.
+    </p>
+
+    <h2>Contato</h2>
+    <p>Dúvidas sobre estes dados: fale com o administrador do EvaFlies na sua organização.</p>
+  </body>
+</html>

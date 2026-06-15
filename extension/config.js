@@ -1,7 +1,8 @@
 // Configuração compartilhada da extensão.
 export const DEFAULTS = {
-  // URL do backend (proxy da OpenAI). Pode ser alterada no popup.
-  backendUrl: 'http://localhost:3000',
+  // URL do backend em produção (Render). Os vendedores não precisam configurar
+  // nada — já vem apontando pra cá. Pode ser trocada no popup se necessário.
+  backendUrl: 'https://evaflies-backend-ao6m.onrender.com',
   // Tamanho de cada bloco de transcrição, em milissegundos.
   chunkMs: 20000,
   // Como o seu canal (microfone) aparece na transcrição.

@@ -5,3 +5,4 @@ backend/data/
 *.log
 .DS_Store
 dist/
+*.zip

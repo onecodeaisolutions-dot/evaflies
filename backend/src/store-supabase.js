@@ -30,6 +30,13 @@ export async function initStore() {
   }
 }
 
+/** Consulta mínima no Postgres (keep-alive — evita o projeto pausar). */
+export async function ping() {
+  const { error } = await supabase().from(TABLE).select('id').limit(1);
+  if (error) throw error;
+  return true;
+}
+
 export async function listMeetings(ownerId) {
   // Não selecionamos a coluna "owner" aqui para manter compatibilidade caso
   // ela ainda não exista; o filtro por dono só roda quando a auth está ligada.

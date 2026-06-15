@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { transcribe, summarize, config } from './src/openai.js';
 import {
   initStore,
+  ping,
   listMeetings,
   getMeeting,
   createMeeting,
@@ -52,6 +53,12 @@ app.get('/api/health', (req, res) => {
     models: config,
   });
 });
+
+// Keep-alive: toca no banco para o Supabase free não pausar por inatividade.
+app.get('/api/ping', wrap(async (req, res) => {
+  await ping();
+  res.json({ ok: true, storage: storageMode, ts: new Date().toISOString() });
+}));
 
 // Quem sou eu? Usado pelo painel para saber se precisa de login.
 app.get('/api/me', requireUser, (req, res) => {

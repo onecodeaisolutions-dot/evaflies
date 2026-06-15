@@ -1,0 +1,28 @@
+name: Keep-alive (mantém Supabase ativo)
+
+# Bate no /api/ping todo dia para o projeto Supabase free não pausar por
+# inatividade (ele pausa após ~7 dias sem uso). Também acorda o Render.
+on:
+  schedule:
+    - cron: "0 12 * * *" # todo dia às 12:00 UTC
+  workflow_dispatch: {} # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pingar o backend
+        env:
+          URL: https://evaflies-backend-ao6m.onrender.com/api/ping
+        run: |
+          # Render free hiberna; a 1ª chamada pode demorar. Tenta algumas vezes.
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -m 90 -o /tmp/resp -w "%{http_code}" "$URL" || true)
+            echo "tentativa $i -> HTTP $code"
+            cat /tmp/resp 2>/dev/null || true
+            echo
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          echo "::error::Keep-alive falhou após 5 tentativas"
+          exit 1

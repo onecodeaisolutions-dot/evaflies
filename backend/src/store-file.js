@@ -37,6 +37,12 @@ export async function initStore() {
   await ensureFile();
 }
 
+/** Toque leve no storage (keep-alive). */
+export async function ping() {
+  await ensureFile();
+  return true;
+}
+
 /** Lista as reuniões (mais recentes primeiro), sem o transcript completo.
  *  ownerId: se informado, retorna só as reuniões desse dono. */
 export async function listMeetings(ownerId) {

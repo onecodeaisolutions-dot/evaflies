@@ -48,8 +48,15 @@ export function requireUser(req, res, next) {
     req.user = null;
     return next();
   }
-  const user = resolveKey(keyFromReq(req));
-  if (!user) return res.status(401).json({ error: 'Código de acesso inválido ou ausente.' });
+  const rawKey = keyFromReq(req);
+  const user = resolveKey(rawKey);
+  if (!user) {
+    console.warn(
+      `AUTH 401 ${req.method} ${req.path} | x-eva-key:${req.get('x-eva-key') ? 'sim' : 'não'}` +
+      ` | authorization:${req.get('authorization') ? 'sim' : 'não'} | prefixo:"${rawKey.slice(0, 6)}"`
+    );
+    return res.status(401).json({ error: 'Código de acesso inválido ou ausente.' });
+  }
   req.user = user;
   next();
 }

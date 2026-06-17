@@ -77,6 +77,7 @@ async function startRecording() {
   await setSession({
     recording: true,
     startedAt: Date.now(),
+    tabId: tab.id,
     tabTitle: tab.title || 'Reunião',
     transcript: '',
     segments: [],
@@ -226,4 +227,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
 
   return true; // resposta assíncrona
+});
+
+// Para a gravação automaticamente se a aba que está sendo gravada for fechada.
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const session = await getSession();
+  if (session && session.recording && session.tabId === tabId) {
+    await stopRecording();
+  }
 });

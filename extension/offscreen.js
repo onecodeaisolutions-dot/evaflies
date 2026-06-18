@@ -122,9 +122,16 @@ function updateMeters() {
 // --------------------------------------------------------------------------
 // Gravação
 // --------------------------------------------------------------------------
+// Áudio completo salvo em baixa taxa (voz) p/ caber no storage e economizar
+// espaço. Não afeta a transcrição (os blocos vão em qualidade cheia à OpenAI).
+const FULL_AUDIO_BPS = 32000;
+
 function startFullRecorder() {
   fullBlobs = [];
-  fullRecorder = new MediaRecorder(mixedStream, { mimeType: pickMime() });
+  fullRecorder = new MediaRecorder(mixedStream, {
+    mimeType: pickMime(),
+    audioBitsPerSecond: FULL_AUDIO_BPS,
+  });
   fullDone = new Promise((resolve) => {
     fullRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) fullBlobs.push(e.data);

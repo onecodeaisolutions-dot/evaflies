@@ -4,6 +4,11 @@ import OpenAI, { toFile } from 'openai';
 const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || 'gpt-4o-transcribe';
 const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-4o-mini';
 const TRANSCRIBE_LANGUAGE = process.env.TRANSCRIBE_LANGUAGE || 'pt';
+// Prompt de contexto: ajuda o modelo a manter o idioma (pt-BR) e o vocabulário
+// do domínio, reduzindo "deriva" para inglês e melhorando termos de vendas.
+const TRANSCRIBE_PROMPT =
+  process.env.TRANSCRIBE_PROMPT ||
+  'Transcrição em português do Brasil de uma reunião de vendas entre um vendedor e um cliente.';
 
 let client = null;
 
@@ -33,10 +38,12 @@ export async function transcribe(buffer, filename = 'audio.webm', mimetype = 'au
     file,
     model: TRANSCRIBE_MODEL,
     language: TRANSCRIBE_LANGUAGE,
+    prompt: TRANSCRIBE_PROMPT,
   };
-  // whisper-1 aceita response_format; os modelos gpt-4o-transcribe retornam json por padrão.
+  // whisper-1 aceita response_format e temperatura (0 = menos alucinação).
   if (TRANSCRIBE_MODEL === 'whisper-1') {
     params.response_format = 'json';
+    params.temperature = 0;
   }
 
   const result = await openai.audio.transcriptions.create(params);

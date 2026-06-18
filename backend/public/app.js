@@ -108,6 +108,7 @@ function renderDetail(m) {
   node.querySelector('.meta').textContent =
     `${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}` +
     (isAdmin && m.owner ? ` · 👤 ${m.owner}` : '');
+  node.querySelector('.btn-download').addEventListener('click', () => downloadTranscript(m));
   node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
   node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
 
@@ -220,6 +221,38 @@ function renderDetail(m) {
   });
 
   detailEl.appendChild(node);
+}
+
+// --------------------------------------------------------------------------
+// Baixar transcrição (.txt)
+// --------------------------------------------------------------------------
+function downloadTranscript(m) {
+  const segments = (m.segments && m.segments.length)
+    ? m.segments
+    : (m.transcript ? [{ startMs: 0, text: m.transcript, speaker: null }] : []);
+
+  const linhas = [];
+  linhas.push(m.title);
+  linhas.push(`${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}` + (m.owner ? ` · ${m.owner}` : ''));
+  linhas.push('='.repeat(40));
+  linhas.push('');
+  for (const s of segments) {
+    const ts = `[${fmtTime(s.startMs)}]`;
+    const who = s.speaker ? `${s.speaker}: ` : '';
+    linhas.push(`${ts} ${who}${s.text}`);
+  }
+  const conteudo = linhas.join('\n');
+
+  const nome = (m.title || 'reuniao').replace(/[^\w\-À-ÿ ]+/g, '').trim().slice(0, 80) || 'reuniao';
+  const blob = new Blob([conteudo], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${nome}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // --------------------------------------------------------------------------

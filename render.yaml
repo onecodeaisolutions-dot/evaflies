@@ -27,6 +27,8 @@ services:
         value: gpt-4o-mini
       - key: TRANSCRIBE_LANGUAGE
         value: pt
+      - key: TRANSCRIBE_PROMPT
+        value: Transcrição em português do Brasil de uma reunião de vendas entre um vendedor e um cliente.
       - key: CORS_ORIGIN
         value: "*"
       # Separação por vendedor. Deixe vazio para auth desligada. Defina no painel

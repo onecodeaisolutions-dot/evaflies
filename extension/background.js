@@ -97,6 +97,7 @@ async function startRecording() {
     userName: settings.userName,
     othersName: settings.othersName,
     accessKey: settings.accessKey,
+    tabTitle: tab.title || 'Reunião',
   }).catch(() => {});
 
   broadcast({ type: 'SESSION_UPDATE' });
@@ -108,46 +109,22 @@ async function stopRecording() {
   broadcast({ type: 'SESSION_UPDATE' });
 }
 
-// Chamado quando o offscreen confirma que parou: salva a reunião no backend.
-async function finalize() {
-  const session = await getSession();
+// Chamado quando o offscreen termina (ele já transcreveu e criou a reunião).
+async function finalize(meeting, errorMsg) {
   await closeOffscreen();
-
-  if (!session) return;
-
-  const transcript = (session.transcript || '').trim();
-  const durationMs = session.startedAt ? Date.now() - session.startedAt : 0;
-
-  if (!transcript) {
-    await patchSession({ recording: false, status: 'Sem áudio transcrito.' });
-    broadcast({ type: 'SESSION_UPDATE' });
-    return;
-  }
-
-  await patchSession({ recording: false, status: 'Gerando resumo…' });
-  broadcast({ type: 'SESSION_UPDATE' });
-
-  try {
-    const settings = await getSettings();
-    const headers = { 'Content-Type': 'application/json' };
-    if (settings.accessKey) headers['x-eva-key'] = settings.accessKey;
-    const res = await fetch(`${settings.backendUrl}/api/meetings`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        title: session.tabTitle,
-        transcript,
-        segments: session.segments || [],
-        durationMs,
-        audioId: session.audioId || null,
-        summarize: true,
-      }),
+  if (meeting) {
+    await patchSession({
+      recording: false,
+      status: 'Concluído ✅',
+      meeting,
+      transcript: meeting.transcript || '',
+      segments: meeting.segments || [],
     });
-    if (!res.ok) throw new Error(`Backend respondeu ${res.status}`);
-    const meeting = await res.json();
-    await patchSession({ status: 'Concluído ✅', meeting });
-  } catch (err) {
-    await patchSession({ status: `Salvo localmente (erro no backend: ${err.message})` });
+  } else {
+    await patchSession({
+      recording: false,
+      status: errorMsg ? `Erro: ${errorMsg}` : 'Sem transcrição.',
+    });
   }
   broadcast({ type: 'SESSION_UPDATE' });
 }
@@ -210,8 +187,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'CAPTURE_STOPPED':
-        await patchSession({ audioId: message.audioId || null });
-        await finalize();
+        await finalize(message.meeting || null, message.error || null);
         sendResponse({ ok: true });
         break;
 

@@ -40,9 +40,13 @@ function renderSession(session) {
   els.status.textContent = session?.status || 'Pronto.';
 
   if (session?.startedAt) {
-    const secs = Math.round(((session.recording ? Date.now() : session.startedAt + 0) - session.startedAt) / 1000);
-    const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
-    els.meta.textContent = `${segCount} bloco(s) transcrito(s)` + (recording ? ` · ${secs}s` : '');
+    const secs = Math.round((Date.now() - session.startedAt) / 1000);
+    if (recording) {
+      els.meta.textContent = `Gravando · ${secs}s`;
+    } else {
+      const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
+      els.meta.textContent = segCount ? `${segCount} trecho(s) transcrito(s)` : '';
+    }
   } else {
     els.meta.textContent = '';
   }
@@ -53,7 +57,7 @@ function renderSession(session) {
     els.transcript.scrollTop = els.transcript.scrollHeight;
   } else {
     els.transcript.innerHTML =
-      '<span class="muted">A transcrição aparece aqui durante a gravação…</span>';
+      '<span class="muted">A transcrição é gerada ao parar a gravação.</span>';
   }
 
   // Resumo (após finalizar)

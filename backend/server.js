@@ -6,7 +6,7 @@ import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { transcribe, summarize, config } from './src/openai.js';
+import { transcribe, transcribeVerbose, summarize, config } from './src/openai.js';
 import {
   initStore,
   ping,
@@ -39,6 +39,12 @@ const upload = multer({
 const uploadAudio = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 200 * 1024 * 1024 },
+});
+
+// Finalização (novo fluxo): áudio mixado + 2 canais. Limite por arquivo 40MB.
+const uploadFinalize = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 40 * 1024 * 1024 },
 });
 
 // Wrapper para capturar erros de handlers async.
@@ -150,6 +156,74 @@ app.post('/api/meetings', requireUser, wrap(async (req, res) => {
   const meeting = await createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner });
   res.status(201).json(meeting);
 }));
+
+// Finalização no FINAL da reunião: recebe o áudio mixado (playback) + os dois
+// canais (vendedor/cliente), transcreve cada canal inteiro com timestamps,
+// intercala por tempo, resume e cria a reunião. (Fluxo da extensão 1.1+.)
+app.post(
+  '/api/meetings/finalize',
+  requireUser,
+  uploadFinalize.fields([
+    { name: 'mixed', maxCount: 1 },
+    { name: 'self', maxCount: 1 },
+    { name: 'others', maxCount: 1 },
+  ]),
+  wrap(async (req, res) => {
+    const files = req.files || {};
+    const { title, selfName, othersName, durationMs } = req.body || {};
+    const wantSummary = req.body?.summarize !== 'false';
+
+    // 1) Salva o áudio mixado (para reprodução no painel).
+    let audioId = null;
+    const mixed = files.mixed?.[0];
+    if (mixed && mixed.size > 1200) {
+      audioId = await saveAudio(mixed.buffer, mixed.mimetype || 'audio/webm');
+    }
+
+    // 2) Transcreve os dois canais em paralelo, cada um com seu falante.
+    const jobs = [];
+    const sf = files.self?.[0];
+    const ot = files.others?.[0];
+    jobs.push(
+      sf && sf.size > 1200
+        ? transcribeVerbose(sf.buffer, 'self.webm').then((segs) =>
+            segs.map((s) => ({ ...s, speaker: selfName || 'Você' })))
+        : Promise.resolve([])
+    );
+    jobs.push(
+      ot && ot.size > 1200
+        ? transcribeVerbose(ot.buffer, 'others.webm').then((segs) =>
+            segs.map((s) => ({ ...s, speaker: othersName || 'Cliente' })))
+        : Promise.resolve([])
+    );
+    const [selfSegs, otherSegs] = await Promise.all(jobs);
+
+    const segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+    const transcript = segments.map((s) => `${s.speaker}: ${s.text}`).join('\n');
+
+    // 3) Resumo.
+    let summary = null;
+    if (wantSummary && transcript.trim()) {
+      try {
+        summary = await summarize(transcript, title);
+      } catch (err) {
+        console.error('Falha ao resumir:', err.message);
+      }
+    }
+
+    const owner = req.user ? req.user.id : null;
+    const meeting = await createMeeting({
+      title,
+      transcript,
+      segments,
+      summary,
+      durationMs: Number(durationMs) || 0,
+      audioId,
+      owner,
+    });
+    res.status(201).json(meeting);
+  })
+);
 
 app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
   // Garante que o usuário só altera reuniões que pode ver.

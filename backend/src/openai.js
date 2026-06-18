@@ -51,6 +51,37 @@ export async function transcribe(buffer, filename = 'audio.webm', mimetype = 'au
 }
 
 /**
+ * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo (para intercalar
+ * canais). Usa whisper-1 (verbose_json) que retorna timestamps por segmento.
+ * @param {Buffer} buffer
+ * @param {string} filename
+ * @param {string} [mimetype]
+ * @returns {Promise<Array<{startMs:number,endMs:number,text:string}>>}
+ */
+export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
+  const openai = getClient();
+  const file = await toFile(buffer, filename, { type: mimetype });
+  const result = await openai.audio.transcriptions.create({
+    file,
+    model: 'whisper-1',
+    language: TRANSCRIBE_LANGUAGE,
+    prompt: TRANSCRIBE_PROMPT,
+    response_format: 'verbose_json',
+    timestamp_granularities: ['segment'],
+    temperature: 0,
+  });
+  const segs = Array.isArray(result.segments) ? result.segments : [];
+  return segs
+    // descarta trechos sem fala (reduz alucinação em silêncio).
+    .filter((s) => (s.text || '').trim() && (s.no_speech_prob == null || s.no_speech_prob < 0.6))
+    .map((s) => ({
+      startMs: Math.round((s.start || 0) * 1000),
+      endMs: Math.round((s.end || 0) * 1000),
+      text: (s.text || '').trim(),
+    }));
+}
+
+/**
  * Gera um resumo estruturado a partir da transcrição completa.
  * @param {string} transcript
  * @param {string} [title]

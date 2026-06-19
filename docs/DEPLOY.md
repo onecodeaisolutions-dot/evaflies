@@ -13,6 +13,8 @@ ficam no Supabase (free): Postgres para as reuniões + Storage para os áudios.
    banco; a região mais perto de você é melhor).
 2. Crie a tabela: no projeto → **SQL Editor** → cole o conteúdo de
    [`backend/supabase-schema.sql`](../backend/supabase-schema.sql) → **Run**.
+   > Já tem um banco antigo? Rode o SQL de novo: ele só **adiciona** o que falta
+   > (incluindo a coluna `share_id`, usada pelos links compartilháveis). É seguro.
 3. Pegue as credenciais em **Project Settings → API**:
    - **Project URL** → vira `SUPABASE_URL`
    - **service_role** (em *Project API keys*, a secreta) → vira `SUPABASE_SERVICE_ROLE_KEY`

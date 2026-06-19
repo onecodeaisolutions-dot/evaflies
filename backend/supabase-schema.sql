@@ -18,8 +18,13 @@ create table if not exists public.meetings (
 -- Se a tabela já existir (criada antes), adiciona a coluna owner:
 alter table public.meetings add column if not exists owner text;
 
+-- Compartilhamento público por token (link compartilhável de uma reunião):
+alter table public.meetings add column if not exists share_id text;
+
 create index if not exists meetings_created_at_idx on public.meetings (created_at desc);
 create index if not exists meetings_owner_idx on public.meetings (owner);
+-- Lookup rápido pelo token + garante unicidade (vários NULLs são permitidos):
+create unique index if not exists meetings_share_id_idx on public.meetings (share_id);
 
 -- O bucket de áudio ("meeting-audio") é criado automaticamente pelo backend na
 -- inicialização. Se preferir criar manualmente: Storage -> New bucket ->

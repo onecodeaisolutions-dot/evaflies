@@ -84,11 +84,19 @@ export async function createMeeting({ title, transcript, segments, summary, dura
     durationMs: durationMs || 0,
     audioId: audioId || null,
     owner: owner || null,
+    shareId: null,
     createdAt: new Date().toISOString(),
   };
   meetings.push(meeting);
   await writeAll(meetings);
   return meeting;
+}
+
+/** Busca uma reunião pelo token público de compartilhamento. */
+export async function getMeetingByShareId(shareId) {
+  if (!shareId) return null;
+  const meetings = await readAll();
+  return meetings.find((x) => x.shareId === shareId) || null;
 }
 
 /** Atualiza campos de uma reunião existente. */

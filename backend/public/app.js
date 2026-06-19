@@ -146,7 +146,8 @@ async function openMeeting(id) {
   renderDetail(m);
 }
 
-function renderDetail(m) {
+function renderDetail(m, ctx = {}) {
+  const share = ctx.share || null; // token quando estamos na view pública
   detailEl.innerHTML = '';
   const node = tpl.content.cloneNode(true);
 
@@ -160,8 +161,16 @@ function renderDetail(m) {
   meta.innerHTML = metaHtml;
 
   node.querySelector('.btn-download').addEventListener('click', () => downloadTranscript(m));
-  node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
-  node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
+  if (share) {
+    // View pública: só leitura — remove renomear/excluir/compartilhar.
+    node.querySelector('.btn-rename').remove();
+    node.querySelector('.btn-delete').remove();
+    node.querySelector('.btn-share').remove();
+  } else {
+    node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
+    node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
+    node.querySelector('.btn-share').addEventListener('click', () => openShareModal(m));
+  }
 
   // --- Player customizado ---
   const playerEl = node.querySelector('.player');
@@ -179,7 +188,7 @@ function renderDetail(m) {
     audio.duration && isFinite(audio.duration) ? audio.duration : (m.durationMs || 0) / 1000;
 
   if (m.audioId) {
-    audio.src = audioUrl(m.audioId);
+    audio.src = share ? `/api/share/${encodeURIComponent(share)}/audio` : audioUrl(m.audioId);
     audio.playbackRate = playbackSpeed;
     fixWebmDuration(audio);
     tDur.textContent = fmtTime(m.durationMs);
@@ -349,6 +358,34 @@ function renderSummary(container, m, segments) {
 }
 
 // --------------------------------------------------------------------------
+// View pública (link compartilhado: ?share=<token>)
+// --------------------------------------------------------------------------
+async function renderSharePage(token) {
+  document.body.classList.add('share-mode');
+  const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    detailEl.innerHTML =
+      '<div class="empty"><h1>Link indisponível</h1>' +
+      '<p>Este link de compartilhamento é inválido ou foi revogado pelo autor.</p></div>';
+    return;
+  }
+  const m = await res.json();
+  // O player liga em m.audioId; usamos um marcador truthy quando há áudio, mas a
+  // fonte real vem do endpoint público (definido em renderDetail via ctx.share).
+  m.audioId = m.hasAudio ? 'shared' : null;
+  renderDetail(m, { share: token });
+
+  const banner = document.createElement('div');
+  banner.className = 'share-banner';
+  banner.innerHTML =
+    '<div class="brand" style="padding:0">' +
+    '<div class="brand-tile"><img src="EvaFlies-logo.png" alt="EvaFlies" /></div>' +
+    '<span class="brand-word">Eva<span>Flies</span></span></div>' +
+    '<span class="share-tag">Reunião compartilhada</span>';
+  detailEl.prepend(banner);
+}
+
+// --------------------------------------------------------------------------
 // Baixar transcrição (.txt)
 // --------------------------------------------------------------------------
 function downloadTranscript(m) {
@@ -475,6 +512,61 @@ loginBtn.addEventListener('click', doLogin);
 loginKeyEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
 // --------------------------------------------------------------------------
+// Compartilhar (gerar / copiar / revogar link)
+// --------------------------------------------------------------------------
+const shareModal = document.getElementById('share-modal');
+const shareLinkEl = document.getElementById('share-link');
+const shareCopyBtn = document.getElementById('share-copy');
+const shareRevokeBtn = document.getElementById('share-revoke');
+const shareCloseBtn = document.getElementById('share-close');
+let shareMeeting = null;
+
+async function openShareModal(m) {
+  shareMeeting = m;
+  shareLinkEl.value = 'Gerando link…';
+  shareCopyBtn.textContent = 'Copiar';
+  shareModal.classList.remove('hidden');
+  try {
+    const res = await api(`/api/meetings/${m.id}/share`, { method: 'POST' });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const { shareId } = await res.json();
+    m.shareId = shareId;
+    shareLinkEl.value = `${location.origin}/?share=${shareId}`;
+    shareLinkEl.focus();
+    shareLinkEl.select();
+  } catch (err) {
+    shareModal.classList.add('hidden');
+    alert(`Não foi possível gerar o link: ${err.message}`);
+  }
+}
+
+shareCopyBtn.addEventListener('click', async () => {
+  if (!shareLinkEl.value || shareLinkEl.value === 'Gerando link…') return;
+  try {
+    await navigator.clipboard.writeText(shareLinkEl.value);
+  } catch {
+    shareLinkEl.select();
+    document.execCommand('copy');
+  }
+  shareCopyBtn.textContent = 'Copiado!';
+  setTimeout(() => (shareCopyBtn.textContent = 'Copiar'), 1200);
+});
+
+shareRevokeBtn.addEventListener('click', async () => {
+  if (!shareMeeting) return;
+  if (!confirm('Revogar este link?\nQuem tiver o link atual perderá o acesso.')) return;
+  const res = await api(`/api/meetings/${shareMeeting.id}/share`, { method: 'DELETE' });
+  if (!res.ok) return alert('Não foi possível revogar o link.');
+  shareMeeting.shareId = null;
+  shareModal.classList.add('hidden');
+});
+
+shareCloseBtn.addEventListener('click', () => shareModal.classList.add('hidden'));
+shareModal.addEventListener('click', (e) => {
+  if (e.target === shareModal) shareModal.classList.add('hidden');
+});
+
+// --------------------------------------------------------------------------
 // Init
 // --------------------------------------------------------------------------
 let searchTimer;
@@ -544,6 +636,10 @@ async function populateOwners() {
 }
 
 async function start() {
+  // Link público: abre a view de leitura e ignora o fluxo autenticado.
+  const shareToken = new URLSearchParams(location.search).get('share');
+  if (shareToken) return renderSharePage(shareToken);
+
   const meRes = await api('/api/me');
   if (meRes.status === 401) return showLogin();
   const me = await meRes.json();

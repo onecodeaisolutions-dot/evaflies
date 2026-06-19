@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setGlobalDispatcher, Agent } from 'undici';
@@ -27,6 +28,7 @@ import {
   ping,
   listMeetings,
   getMeeting,
+  getMeetingByShareId,
   createMeeting,
   updateMeeting,
   deleteMeeting,
@@ -256,6 +258,49 @@ app.delete('/api/meetings/:id', requireUser, wrap(async (req, res) => {
   }
   await deleteMeeting(req.params.id, owner);
   res.json({ ok: true });
+}));
+
+// --- Compartilhamento público de uma reunião ------------------------------
+// O dono gera um token secreto (link compartilhável). Quem tiver o link acessa
+// só aquela reunião (áudio + transcrição + resumo), sem login.
+app.post('/api/meetings/:id/share', requireUser, wrap(async (req, res) => {
+  const meeting = await getMeeting(req.params.id, ownerFilter(req));
+  if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+  let shareId = meeting.shareId;
+  if (!shareId) {
+    shareId = crypto.randomBytes(16).toString('hex'); // 128 bits, não enumerável
+    await updateMeeting(meeting.id, { shareId });
+  }
+  res.json({ shareId });
+}));
+
+// Revoga o link (quem tiver o token antigo perde o acesso).
+app.delete('/api/meetings/:id/share', requireUser, wrap(async (req, res) => {
+  const meeting = await getMeeting(req.params.id, ownerFilter(req));
+  if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+  await updateMeeting(meeting.id, { shareId: null });
+  res.json({ ok: true });
+}));
+
+// Acesso PÚBLICO (sem login) via token. Devolve só o necessário, sem expor o dono.
+app.get('/api/share/:token', wrap(async (req, res) => {
+  const m = await getMeetingByShareId(req.params.token);
+  if (!m) return res.status(404).json({ error: 'Link inválido ou revogado.' });
+  res.json({
+    title: m.title,
+    createdAt: m.createdAt,
+    durationMs: m.durationMs,
+    segments: m.segments || [],
+    summary: m.summary || null,
+    hasAudio: Boolean(m.audioId),
+  });
+}));
+
+// Áudio público via token (o <audio> não envia headers; o token vai na URL).
+app.get('/api/share/:token/audio', wrap(async (req, res) => {
+  const m = await getMeetingByShareId(req.params.token);
+  if (!m || !m.audioId) return res.status(404).json({ error: 'Áudio não encontrado.' });
+  return serveAudio(res, m.audioId);
 }));
 
 // --- Painel web (dashboard estilo Fireflies) ------------------------------

@@ -15,6 +15,7 @@ function toMeeting(row) {
     durationMs: row.duration_ms || 0,
     audioId: row.audio_id || null,
     owner: row.owner || null,
+    shareId: row.share_id || null,
     createdAt: row.created_at,
   };
 }
@@ -99,6 +100,7 @@ export async function updateMeeting(id, patch) {
     summary: 'summary',
     durationMs: 'duration_ms',
     audioId: 'audio_id',
+    shareId: 'share_id',
   };
   const row = {};
   for (const [k, v] of Object.entries(patch || {})) {
@@ -106,6 +108,13 @@ export async function updateMeeting(id, patch) {
   }
   if (!Object.keys(row).length) return getMeeting(id);
   const { data, error } = await supabase().from(TABLE).update(row).eq('id', id).select().maybeSingle();
+  if (error) throw error;
+  return toMeeting(data);
+}
+
+export async function getMeetingByShareId(shareId) {
+  if (!shareId) return null;
+  const { data, error } = await supabase().from(TABLE).select('*').eq('share_id', shareId).maybeSingle();
   if (error) throw error;
   return toMeeting(data);
 }

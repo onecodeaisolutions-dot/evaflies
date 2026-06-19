@@ -66,7 +66,10 @@ async function postFinalize(form) {
         signal: ctrl.signal,
       });
       clearTimeout(timer);
-      if (res.status >= 500 || res.status === 429) throw new Error(`servidor ${res.status}`);
+      if (res.status >= 500 || res.status === 429) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`servidor ${res.status}: ${body.slice(0, 200)}`);
+      }
       if (!res.ok) {
         const body = await res.text();
         throw new Error(`finalize ${res.status}: ${body.slice(0, 140)}`); // 4xx: não adianta repetir

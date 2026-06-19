@@ -185,20 +185,28 @@ app.post(
     //    OpenAI ("Premature close").
     const sf = files.self?.[0];
     const ot = files.others?.[0];
-    const selfSegs =
-      sf && sf.size > 1200
-        ? (await transcribeVerbose(sf.buffer, 'self.webm')).map((s) => ({
-            ...s,
-            speaker: selfName || 'Você',
-          }))
-        : [];
-    const otherSegs =
-      ot && ot.size > 1200
-        ? (await transcribeVerbose(ot.buffer, 'others.webm')).map((s) => ({
-            ...s,
-            speaker: othersName || 'Cliente',
-          }))
-        : [];
+    let selfSegs = [];
+    let otherSegs = [];
+    try {
+      selfSegs =
+        sf && sf.size > 1200
+          ? (await transcribeVerbose(sf.buffer, 'self.webm')).map((s) => ({
+              ...s,
+              speaker: selfName || 'Você',
+            }))
+          : [];
+      otherSegs =
+        ot && ot.size > 1200
+          ? (await transcribeVerbose(ot.buffer, 'others.webm')).map((s) => ({
+              ...s,
+              speaker: othersName || 'Cliente',
+            }))
+          : [];
+    } catch (err) {
+      const e = new Error(`Falha na transcrição (OpenAI): ${err.message}`);
+      e.status = 502; // erro do serviço de transcrição, não do nosso app
+      throw e;
+    }
 
     let segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
     // Reenvio de áudio salvo: só veio o arquivo mixado -> transcreve sem separar.

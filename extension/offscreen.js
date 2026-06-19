@@ -33,6 +33,70 @@ const status = (text) => send({ type: 'CAPTURE_STATUS', status: text });
 const authHeaders = () => (accessKey ? { 'x-eva-key': accessKey } : {});
 const pickMime = () =>
   MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Acorda o servidor (o Render free "dorme" e o 1º request pode demorar/falhar).
+async function wakeServer() {
+  for (let i = 0; i < 6; i++) {
+    try {
+      const r = await fetch(`${backendUrl}/api/health`, { method: 'GET' });
+      if (r.ok) return;
+    } catch { /* ainda acordando */ }
+    await sleep(3000);
+  }
+}
+
+// Envia a finalização com retry + timeout (cobre cold start e falhas passageiras).
+async function postFinalize(form) {
+  const url = `${backendUrl}/api/meetings/finalize`;
+  const delays = [0, 5000, 15000, 30000];
+  let lastErr;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i]) {
+      status(`Tentando novamente em alguns segundos… (${i + 1}/${delays.length})`);
+      await sleep(delays[i]);
+    }
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 240000); // transcrição pode levar ~1min
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        body: form,
+        headers: authHeaders(),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (res.status >= 500 || res.status === 429) throw new Error(`servidor ${res.status}`);
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`finalize ${res.status}: ${body.slice(0, 140)}`); // 4xx: não adianta repetir
+      }
+      return await res.json();
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err;
+      // erros de cliente (4xx) não se resolvem com retry.
+      if (/finalize 4\d\d/.test(err.message)) break;
+    }
+  }
+  throw lastErr || new Error('falha ao finalizar');
+}
+
+// Último recurso: salva o áudio nos Downloads para o vendedor não perder a reunião.
+function downloadBlob(blob, name) {
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Cria um gravador contínuo e uma Promise que resolve com o Blob ao parar.
 function makeRecorder(stream, bps) {
@@ -104,9 +168,10 @@ async function stopCapture() {
 
   let meeting = null;
   let errorMsg = null;
+  let mixedBlob = null;
   try {
-    status('Salvando áudio e transcrevendo… (pode levar até ~1 min)');
-    const mixedBlob = await mixedRec.done;
+    status('Finalizando gravação…');
+    mixedBlob = await mixedRec.done;
     const othersBlob = await tabRec.done;
     const selfBlob = micRec ? await micRec.done : null;
 
@@ -121,18 +186,18 @@ async function stopCapture() {
     form.append('durationMs', String(durationMs));
     form.append('summarize', 'true');
 
-    const res = await fetch(`${backendUrl}/api/meetings/finalize`, {
-      method: 'POST',
-      body: form,
-      headers: authHeaders(),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`finalize ${res.status}: ${body.slice(0, 140)}`);
-    }
-    meeting = await res.json();
+    status('Conectando ao servidor…');
+    await wakeServer();
+    status('Transcrevendo no servidor… (pode levar até ~1 min)');
+    meeting = await postFinalize(form);
   } catch (err) {
     errorMsg = err.message;
+    // Não conseguimos enviar: salva o áudio localmente para não perder a reunião.
+    if (mixedBlob && mixedBlob.size > 1200) {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const saved = downloadBlob(mixedBlob, `evaflies-reuniao-${stamp}.webm`);
+      if (saved) errorMsg = `${err.message} — áudio salvo em Downloads (você pode reenviar depois).`;
+    }
   }
 
   cleanup();

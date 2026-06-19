@@ -65,6 +65,24 @@ async function closeOffscreen() {
 // --------------------------------------------------------------------------
 // Início / fim da gravação
 // --------------------------------------------------------------------------
+// Badge no ícone: 'rec' enquanto grava, 'proc' enquanto transcreve, null limpa.
+function setRecBadge(state) {
+  try {
+    if (state === 'rec') {
+      chrome.action.setBadgeText({ text: 'REC' });
+      chrome.action.setBadgeBackgroundColor({ color: '#d33636' });
+      chrome.action.setTitle({ title: 'EvaFlies — gravando reunião' });
+    } else if (state === 'proc') {
+      chrome.action.setBadgeText({ text: '···' });
+      chrome.action.setBadgeBackgroundColor({ color: '#d18b1f' });
+      chrome.action.setTitle({ title: 'EvaFlies — processando…' });
+    } else {
+      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setTitle({ title: 'EvaFlies' });
+    }
+  } catch { /* action API indisponível */ }
+}
+
 async function startRecording() {
   const settings = await getSettings();
 
@@ -87,6 +105,7 @@ async function startRecording() {
   });
 
   await ensureOffscreen();
+  setRecBadge('rec');
 
   chrome.runtime.sendMessage({
     target: 'offscreen',
@@ -104,6 +123,7 @@ async function startRecording() {
 }
 
 async function stopRecording() {
+  setRecBadge('proc');
   await patchSession({ status: 'Finalizando…' });
   chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP_CAPTURE' }).catch(() => {});
   broadcast({ type: 'SESSION_UPDATE' });
@@ -112,6 +132,7 @@ async function stopRecording() {
 // Chamado quando o offscreen termina (ele já transcreveu e criou a reunião).
 async function finalize(meeting, errorMsg) {
   await closeOffscreen();
+  setRecBadge(null);
   if (meeting) {
     await patchSession({
       recording: false,
@@ -180,6 +201,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case 'CAPTURE_ERROR':
+        setRecBadge(null);
         await patchSession({ recording: false, status: `Erro: ${message.error}` });
         await closeOffscreen();
         broadcast({ type: 'SESSION_UPDATE' });
@@ -196,6 +218,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   })().catch((err) => {
     console.error('background error:', err);
+    setRecBadge(null);
     patchSession({ recording: false, status: `Erro: ${err.message}` }).then(() =>
       broadcast({ type: 'SESSION_UPDATE' })
     );

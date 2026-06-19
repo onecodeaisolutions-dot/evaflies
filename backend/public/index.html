@@ -4,60 +4,110 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EvaFlies — Reuniões</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <aside class="sidebar">
-      <div class="brand">🎙️ <span>EvaFlies</span></div>
-      <div id="userbar" class="userbar hidden"></div>
-      <div class="sidebar-head">
-        <h2>Reuniões</h2>
-        <select id="owner-filter" class="owner-filter hidden"></select>
-        <input id="search" type="text" placeholder="Buscar no título e na transcrição…" />
+    <aside class="sidebar eva-scroll">
+      <div class="sidebar-glow"></div>
+
+      <div class="brand">
+        <div class="brand-tile"><img src="EvaFlies-logo.png" alt="EvaFlies" /></div>
+        <span class="brand-word">Eva<span>Flies</span></span>
+      </div>
+
+      <div id="userbar" class="user-card hidden"></div>
+
+      <div class="section-label">
+        <span>REUNIÕES</span>
+        <div class="section-line"></div>
+      </div>
+
+      <div class="sidebar-controls">
+        <div class="select-wrap hidden" id="owner-wrap">
+          <select id="owner-filter" class="owner-filter"></select>
+          <span class="select-caret">▾</span>
+        </div>
+
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="search" type="text" placeholder="Buscar no título e na transcrição…" />
+        </div>
+
         <div class="filters">
           <input id="from" type="date" title="De" />
           <span class="filters-sep">→</span>
           <input id="to" type="date" title="Até" />
           <button id="clear-filters" title="Limpar filtros">✕</button>
         </div>
-        <button id="resend-btn" class="resend-btn"
-          title="Reenviar um áudio salvo (.webm) para transcrever — útil se a transcrição falhou no fim da reunião">
-          ⬆️ Reenviar áudio salvo
+
+        <button
+          id="resend-btn"
+          class="resend-btn"
+          title="Reenviar um áudio salvo (.webm) para transcrever — útil se a transcrição falhou no fim da reunião"
+        >
+          <span class="resend-icon">⤴</span> Reenviar áudio salvo
         </button>
         <input id="resend-file" type="file" accept="audio/webm,audio/*,.webm" class="hidden" />
       </div>
+
+      <div class="divider"></div>
+
       <div id="list" class="list"></div>
     </aside>
 
-    <main id="detail" class="detail">
+    <main id="detail" class="main eva-scroll">
       <div class="empty">
         <h1>Selecione uma reunião</h1>
-        <p>Cada reunião gravada pela extensão aparece na lista à esquerda, com a
-          transcrição minuto a minuto e a gravação do áudio.</p>
+        <p>
+          Cada reunião gravada pela extensão aparece na lista à esquerda, com a
+          transcrição minuto a minuto e a gravação do áudio.
+        </p>
       </div>
     </main>
 
     <template id="detail-template">
       <header class="detail-head">
-        <div class="detail-head-top">
+        <div class="detail-head-info">
           <h1 class="title"></h1>
-          <div class="detail-actions">
-            <button class="btn-download" title="Baixar transcrição (.txt)">⬇️ Baixar</button>
-            <button class="btn-rename" title="Renomear">✏️ Renomear</button>
-            <button class="btn-delete" title="Excluir">🗑️ Excluir</button>
-          </div>
+          <div class="meta"></div>
         </div>
-        <div class="meta"></div>
+        <div class="detail-actions">
+          <button class="btn btn-download" title="Baixar transcrição (.txt)">⤓ Baixar</button>
+          <button class="btn btn-rename" title="Renomear">✎ Renomear</button>
+          <button class="btn btn-danger btn-delete" title="Excluir">⌦ Excluir</button>
+        </div>
       </header>
 
-      <audio class="player" controls preload="metadata"></audio>
-      <div class="speed">
-        <span class="speed-label">Velocidade</span>
-        <button data-speed="1" class="speed-btn">1x</button>
-        <button data-speed="1.25" class="speed-btn">1.25x</button>
-        <button data-speed="1.5" class="speed-btn">1.5x</button>
-        <button data-speed="1.75" class="speed-btn">1.75x</button>
-        <button data-speed="2" class="speed-btn">2x</button>
+      <div class="player">
+        <div class="player-glow"></div>
+        <div class="player-row">
+          <button class="play-btn" title="Reproduzir / pausar">►</button>
+          <div class="wave-wrap">
+            <div class="waveform" title="Clique para navegar no áudio"></div>
+            <div class="wave-times">
+              <span class="t-cur">0:00</span>
+              <span class="t-dur">0:00</span>
+            </div>
+          </div>
+          <button class="vol-btn" title="Silenciar / ativar som">🔊</button>
+        </div>
+        <div class="speed-row">
+          <span class="speed-label">VELOCIDADE</span>
+          <div class="speed-btns">
+            <button data-speed="1" class="speed-btn">1x</button>
+            <button data-speed="1.25" class="speed-btn">1.25x</button>
+            <button data-speed="1.5" class="speed-btn">1.5x</button>
+            <button data-speed="1.75" class="speed-btn">1.75x</button>
+            <button data-speed="2" class="speed-btn">2x</button>
+          </div>
+        </div>
+        <audio class="audio-el" preload="metadata"></audio>
       </div>
       <p class="no-audio hidden">Sem áudio salvo para esta reunião.</p>
 
@@ -71,16 +121,16 @@
       </section>
 
       <section class="tab-panel hidden" data-panel="summary">
-        <div class="summary-text"></div>
-        <h3>Action items</h3>
-        <ul class="action-items"></ul>
-        <div class="topics"></div>
+        <div class="summary-wrap"></div>
       </section>
     </template>
 
     <div id="login" class="login-overlay hidden">
       <div class="login-box">
-        <h1>🎙️ EvaFlies</h1>
+        <div class="login-brand">
+          <div class="brand-tile"><img src="EvaFlies-logo.png" alt="EvaFlies" /></div>
+          <span class="brand-word">Eva<span>Flies</span></span>
+        </div>
         <p>Digite seu código de acesso para ver suas reuniões.</p>
         <input id="login-key" type="password" placeholder="Código de acesso" />
         <button id="login-btn">Entrar</button>

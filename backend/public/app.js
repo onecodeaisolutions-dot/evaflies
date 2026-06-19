@@ -1,4 +1,5 @@
-// Painel web: lista de reuniões + detalhe (áudio + transcrição com timestamps).
+// Painel web: lista de reuniões + detalhe (player com waveform + transcrição
+// sincronizada por timestamps + resumo).
 
 const listEl = document.getElementById('list');
 const detailEl = document.getElementById('detail');
@@ -7,6 +8,7 @@ const fromEl = document.getElementById('from');
 const toEl = document.getElementById('to');
 const clearFiltersEl = document.getElementById('clear-filters');
 const ownerFilterEl = document.getElementById('owner-filter');
+const ownerWrapEl = document.getElementById('owner-wrap');
 const tpl = document.getElementById('detail-template');
 
 let meetings = [];
@@ -34,7 +36,7 @@ function audioUrl(audioId) {
 const fmtTime = (ms) => {
   const s = Math.max(0, Math.round((ms || 0) / 1000));
   const m = Math.floor(s / 60);
-  return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
 };
 const fmtDate = (iso) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
 const fmtDur = (ms) => {
@@ -44,6 +46,47 @@ const fmtDur = (ms) => {
 const escapeHtml = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Cores de locutor: 1º → roxo, 2º → ciano (intenção Você/Participantes).
+function makeColorFor() {
+  const map = {};
+  const palette = ['#b06bff', '#34d8ff', '#ff9f6c', '#5ad19f', '#ff6c9f'];
+  return (sp) => {
+    if (!sp) return 'var(--meta)';
+    if (!(sp in map)) map[sp] = palette[Object.keys(map).length % palette.length];
+    return map[sp];
+  };
+}
+
+// Waveform decorativa: 74 barras com alturas determinísticas (mesma fórmula do
+// protótipo de design). Devolve uma função update(progress) que pinta as barras.
+const BAR_COUNT = 74;
+const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
+  const v =
+    (Math.sin(i * 0.55) * 0.5 + 0.5) * 0.55 +
+    (Math.sin(i * 1.9 + 1) * 0.5 + 0.5) * 0.3 +
+    (Math.sin(i * 4.1) * 0.5 + 0.5) * 0.15;
+  return Math.max(0.12, Math.min(1, v));
+});
+
+function buildWaveform(waveEl) {
+  const bars = [];
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.height = `${5 + BAR_HEIGHTS[i] * 34}px`;
+    waveEl.appendChild(bar);
+    bars.push(bar);
+  }
+  return (progress) => {
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const active = i / BAR_COUNT <= progress;
+      const head = active && (i + 1) / BAR_COUNT > progress;
+      bars[i].classList.toggle('active', active);
+      bars[i].classList.toggle('head', head);
+    }
+  };
+}
 
 // --------------------------------------------------------------------------
 // Lista
@@ -64,7 +107,10 @@ async function loadMeetings() {
 function renderList() {
   listEl.innerHTML = '';
   if (!meetings.length) {
-    listEl.innerHTML = '<p style="color:var(--muted);padding:10px">Nenhuma reunião encontrada.</p>';
+    const p = document.createElement('p');
+    p.className = 'list-empty';
+    p.textContent = 'Nenhuma reunião encontrada.';
+    listEl.appendChild(p);
     return;
   }
   for (const m of meetings) {
@@ -72,11 +118,11 @@ function renderList() {
     div.className = 'meeting' + (m.id === activeId ? ' active' : '');
     div.innerHTML =
       `<div class="m-title">${escapeHtml(m.title)}</div>` +
-      `<div class="m-sub"><span>${fmtDate(m.createdAt)}</span>` +
-      `<span>${fmtDur(m.durationMs)}</span>` +
-      (m.hasAudio ? '<span>🎧</span>' : '') +
+      `<div class="m-sub">` +
+      `<span class="m-meta">${fmtDate(m.createdAt)}&nbsp;&nbsp;·&nbsp;&nbsp;${fmtDur(m.durationMs)}</span>` +
+      (m.hasAudio ? '<span class="m-heard" title="Ouvida">🎧</span>' : '') +
       (isAdmin && m.owner ? `<span class="owner-badge">${escapeHtml(m.owner)}</span>` : '') +
-      '</div>';
+      `</div>`;
     div.addEventListener('click', () => openMeeting(m.id));
     listEl.appendChild(div);
   }
@@ -105,67 +151,111 @@ function renderDetail(m) {
   const node = tpl.content.cloneNode(true);
 
   node.querySelector('.title').textContent = m.title;
-  node.querySelector('.meta').textContent =
-    `${fmtDate(m.createdAt)} · ${fmtDur(m.durationMs)}` +
-    (isAdmin && m.owner ? ` · 👤 ${m.owner}` : '');
+
+  const meta = node.querySelector('.meta');
+  let metaHtml = `<span>${fmtDate(m.createdAt)}</span><span class="sep">•</span><span>${fmtDur(m.durationMs)}</span>`;
+  if (isAdmin && m.owner) {
+    metaHtml += `<span class="sep">•</span><span class="owner"><span class="dot"></span>${escapeHtml(m.owner)}</span>`;
+  }
+  meta.innerHTML = metaHtml;
+
   node.querySelector('.btn-download').addEventListener('click', () => downloadTranscript(m));
   node.querySelector('.btn-rename').addEventListener('click', () => renameMeeting(m));
   node.querySelector('.btn-delete').addEventListener('click', () => removeMeeting(m));
 
-  const audio = node.querySelector('.player');
+  // --- Player customizado ---
+  const playerEl = node.querySelector('.player');
   const noAudio = node.querySelector('.no-audio');
-  const speedEl = node.querySelector('.speed');
+  const audio = node.querySelector('.audio-el');
+  const playBtn = node.querySelector('.play-btn');
+  const waveEl = node.querySelector('.waveform');
+  const tCur = node.querySelector('.t-cur');
+  const tDur = node.querySelector('.t-dur');
+  const volBtn = node.querySelector('.vol-btn');
+  const speedBtns = node.querySelectorAll('.speed-btn');
+  const updateWave = buildWaveform(waveEl);
+
+  const curDur = () =>
+    audio.duration && isFinite(audio.duration) ? audio.duration : (m.durationMs || 0) / 1000;
+
   if (m.audioId) {
     audio.src = audioUrl(m.audioId);
     audio.playbackRate = playbackSpeed;
     fixWebmDuration(audio);
-    const btns = speedEl.querySelectorAll('.speed-btn');
-    const markActive = () =>
-      btns.forEach((b) => b.classList.toggle('active', parseFloat(b.dataset.speed) === playbackSpeed));
-    markActive();
-    btns.forEach((b) =>
+    tDur.textContent = fmtTime(m.durationMs);
+
+    const markSpeed = () =>
+      speedBtns.forEach((b) => b.classList.toggle('active', parseFloat(b.dataset.speed) === playbackSpeed));
+    markSpeed();
+    speedBtns.forEach((b) =>
       b.addEventListener('click', () => {
         playbackSpeed = parseFloat(b.dataset.speed);
         localStorage.setItem('eva_speed', String(playbackSpeed));
         audio.playbackRate = playbackSpeed;
-        markActive();
+        markSpeed();
       }));
+
+    playBtn.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()));
+    audio.addEventListener('play', () => {
+      playBtn.textContent = '❚❚';
+      playBtn.classList.add('playing');
+    });
+    const onStop = () => {
+      playBtn.textContent = '►';
+      playBtn.classList.remove('playing');
+    };
+    audio.addEventListener('pause', onStop);
+    audio.addEventListener('ended', onStop);
+
+    const refreshDur = () => (tDur.textContent = fmtTime(curDur() * 1000));
+    audio.addEventListener('loadedmetadata', refreshDur);
+    audio.addEventListener('durationchange', refreshDur);
+
+    waveEl.addEventListener('click', (e) => {
+      const d = curDur();
+      if (!d) return;
+      const r = waveEl.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      audio.currentTime = pct * d;
+      if (audio.paused) audio.play();
+    });
+
+    volBtn.addEventListener('click', () => {
+      audio.muted = !audio.muted;
+      volBtn.classList.toggle('muted', audio.muted);
+      volBtn.textContent = audio.muted ? '🔇' : '🔊';
+    });
   } else {
-    audio.classList.add('hidden');
-    speedEl.classList.add('hidden');
+    playerEl.classList.add('hidden');
     noAudio.classList.remove('hidden');
   }
 
-  // Transcrição com timestamps
+  // --- Transcrição com timestamps ---
   const transcriptEl = node.querySelector('.transcript');
-  const segments = (m.segments && m.segments.length)
-    ? m.segments
-    : (m.transcript ? [{ startMs: 0, endMs: 0, text: m.transcript }] : []);
+  const segments =
+    m.segments && m.segments.length
+      ? m.segments
+      : m.transcript
+      ? [{ startMs: 0, endMs: 0, text: m.transcript }]
+      : [];
 
   if (!segments.length) {
-    transcriptEl.innerHTML = '<p style="color:var(--muted)">Sem transcrição.</p>';
+    transcriptEl.innerHTML = '<p class="summary-muted">Sem transcrição.</p>';
   }
   const segEls = [];
-  const speakerColors = {};
-  const palette = ['#6c8cff', '#38d39f', '#ff9f6c', '#c98cff', '#ff6c9f'];
-  const colorFor = (sp) => {
-    if (!sp) return 'var(--muted)';
-    if (!(sp in speakerColors)) {
-      speakerColors[sp] = palette[Object.keys(speakerColors).length % palette.length];
-    }
-    return speakerColors[sp];
-  };
+  const colorFor = makeColorFor();
 
   for (const seg of segments) {
     const el = document.createElement('div');
     el.className = 'seg';
     el.dataset.start = seg.startMs || 0;
     el.dataset.end = seg.endMs || 0;
-    const speakerLine = seg.speaker
-      ? `<div class="spk" style="color:${colorFor(seg.speaker)}">${escapeHtml(seg.speaker)}</div>`
+    const color = colorFor(seg.speaker);
+    const spkRow = seg.speaker
+      ? `<div class="spk-row"><span class="spk-dot" style="background:${color};box-shadow:0 0 7px ${color}"></span>` +
+        `<span class="spk" style="color:${color}">${escapeHtml(seg.speaker)}</span></div>`
       : '';
-    el.innerHTML = `<div class="ts">${fmtTime(seg.startMs)}</div>` +
-      `<div class="txt">${speakerLine}${escapeHtml(seg.text)}</div>`;
+    el.innerHTML = `<div class="ts">${fmtTime(seg.startMs)}</div>` + `<div class="body">${spkRow}<p class="txt">${escapeHtml(seg.text)}</p></div>`;
     el.addEventListener('click', () => {
       if (!m.audioId) return;
       audio.currentTime = (seg.startMs || 0) / 1000;
@@ -175,8 +265,13 @@ function renderDetail(m) {
     segEls.push(el);
   }
 
-  // Destaca o trecho atual conforme o áudio toca
+  // Destaca o trecho atual + atualiza a waveform conforme o áudio toca.
+  let lastActive = null;
   audio.addEventListener('timeupdate', () => {
+    const d = curDur();
+    updateWave(d ? audio.currentTime / d : 0);
+    tCur.textContent = fmtTime(audio.currentTime * 1000);
+
     const t = audio.currentTime * 1000;
     let current = null;
     for (const el of segEls) {
@@ -184,32 +279,17 @@ function renderDetail(m) {
       const end = +el.dataset.end || Infinity;
       if (t >= start && t < end) current = el;
     }
-    segEls.forEach((el) => el.classList.toggle('active', el === current));
-    if (current) current.scrollIntoView({ block: 'nearest' });
+    if (current !== lastActive) {
+      segEls.forEach((el) => el.classList.toggle('active', el === current));
+      if (current) current.scrollIntoView({ block: 'nearest' });
+      lastActive = current;
+    }
   });
 
-  // Resumo
-  const summaryText = node.querySelector('.summary-text');
-  const actionItems = node.querySelector('.action-items');
-  const topics = node.querySelector('.topics');
-  if (m.summary) {
-    summaryText.textContent = m.summary.summary || '';
-    (m.summary.action_items || []).forEach((it) => {
-      const li = document.createElement('li');
-      li.textContent = it;
-      actionItems.appendChild(li);
-    });
-    (m.summary.topics || []).forEach((tp) => {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.textContent = tp;
-      topics.appendChild(chip);
-    });
-  } else {
-    summaryText.textContent = 'Sem resumo gerado para esta reunião.';
-  }
+  // --- Resumo ---
+  renderSummary(node.querySelector('.summary-wrap'), m, segments);
 
-  // Abas
+  // --- Abas ---
   node.querySelectorAll('.tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       detailEl.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
@@ -221,6 +301,51 @@ function renderDetail(m) {
   });
 
   detailEl.appendChild(node);
+}
+
+// Monta o painel de Resumo. Stats são computados dos dados reais (sem inventar):
+// Duração, Participantes, Palavras e Trechos. Visão geral ← summary; Tópicos ←
+// topics; Itens de ação ← action_items.
+function renderSummary(container, m, segments) {
+  const speakers = new Set((m.segments || []).map((s) => s.speaker).filter(Boolean));
+  const text = segments.map((s) => s.text).join(' ').trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  const wordsLabel = words >= 1000 ? `${(words / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(words);
+
+  const stats = [
+    { label: 'Duração', value: fmtDur(m.durationMs) },
+    { label: 'Participantes', value: speakers.size ? String(speakers.size) : '—' },
+    { label: 'Palavras', value: wordsLabel },
+    { label: 'Trechos', value: String(segments.length) },
+  ];
+
+  const overview = (m.summary && m.summary.summary) || 'Sem resumo gerado para esta reunião.';
+  const topics = (m.summary && m.summary.topics) || [];
+  const actions = (m.summary && m.summary.action_items) || [];
+
+  const statCards = stats
+    .map((s) => `<div class="stat-card"><div class="label">${s.label}</div><div class="value">${escapeHtml(s.value)}</div></div>`)
+    .join('');
+
+  const pointsHtml = topics.length
+    ? `<div class="points">${topics
+        .map((t) => `<div class="point"><span class="bullet"></span><span class="txt">${escapeHtml(t)}</span></div>`)
+        .join('')}</div>`
+    : '<p class="summary-muted">Sem tópicos.</p>';
+
+  const actionsHtml = actions.length
+    ? `<div class="actions">${actions
+        .map((a) => `<div class="action"><span class="check">✓</span><span class="task">${escapeHtml(a)}</span></div>`)
+        .join('')}</div>`
+    : '<p class="summary-muted">Sem itens de ação.</p>';
+
+  container.innerHTML =
+    `<div class="stat-strip">${statCards}</div>` +
+    `<div class="overview-card"><div class="label">VISÃO GERAL</div><p>${escapeHtml(overview)}</p></div>` +
+    `<div class="summary-cols">` +
+    `<div class="summary-col"><div class="col-title">Tópicos</div>${pointsHtml}</div>` +
+    `<div class="summary-col"><div class="col-title">Itens de ação</div>${actionsHtml}</div>` +
+    `</div>`;
 }
 
 // --------------------------------------------------------------------------
@@ -319,8 +444,10 @@ function showLogin(message) {
 
 function renderUserbar(user) {
   userbarEl.classList.remove('hidden');
+  const initial = (user.name || '?').trim().charAt(0).toUpperCase() || '?';
   userbarEl.innerHTML =
-    `<span class="u-name">👤 ${escapeHtml(user.name)}${user.admin ? ' (admin)' : ''}</span>` +
+    `<div class="u-info"><div class="u-avatar">${escapeHtml(initial)}</div>` +
+    `<span class="u-name">${escapeHtml(user.name)}${user.admin ? ' <small>(admin)</small>' : ''}</span></div>` +
     `<button id="logout" class="u-logout">Sair</button>`;
   document.getElementById('logout').addEventListener('click', () => {
     localStorage.removeItem('eva_key');
@@ -373,7 +500,7 @@ resendBtn.addEventListener('click', () => resendFile.click());
 resendFile.addEventListener('change', async () => {
   const file = resendFile.files[0];
   if (!file) return;
-  const label = resendBtn.textContent;
+  const label = resendBtn.innerHTML;
   resendBtn.disabled = true;
   resendBtn.textContent = '⏳ Transcrevendo… (pode levar ~1 min)';
   try {
@@ -392,7 +519,7 @@ resendFile.addEventListener('change', async () => {
     alert(`Falha ao reenviar o áudio: ${err.message}`);
   } finally {
     resendBtn.disabled = false;
-    resendBtn.textContent = label;
+    resendBtn.innerHTML = label;
     resendFile.value = '';
   }
 });
@@ -413,7 +540,7 @@ async function populateOwners() {
     o.textContent = u.name + (u.admin ? ' (admin)' : '');
     ownerFilterEl.appendChild(o);
   }
-  ownerFilterEl.classList.remove('hidden');
+  ownerWrapEl.classList.remove('hidden');
 }
 
 async function start() {

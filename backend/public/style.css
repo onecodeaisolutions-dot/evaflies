@@ -68,6 +68,14 @@ body {
 }
 #clear-filters:hover { border-color: var(--accent); color: var(--text); }
 
+.resend-btn {
+  margin-top: 10px; width: 100%;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 7px; padding: 8px 10px; cursor: pointer; font-size: 12px;
+}
+.resend-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.resend-btn:disabled { opacity: 0.7; cursor: progress; }
+
 /* Ações do detalhe (renomear / excluir) */
 .detail-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .detail-actions { display: flex; gap: 8px; flex-shrink: 0; }

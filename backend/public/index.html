@@ -20,6 +20,11 @@
           <input id="to" type="date" title="Até" />
           <button id="clear-filters" title="Limpar filtros">✕</button>
         </div>
+        <button id="resend-btn" class="resend-btn"
+          title="Reenviar um áudio salvo (.webm) para transcrever — útil se a transcrição falhou no fim da reunião">
+          ⬆️ Reenviar áudio salvo
+        </button>
+        <input id="resend-file" type="file" accept="audio/webm,audio/*,.webm" class="hidden" />
       </div>
       <div id="list" class="list"></div>
     </aside>

@@ -365,6 +365,38 @@ clearFiltersEl.addEventListener('click', () => {
   loadMeetings();
 });
 
+// Reenviar um áudio salvo localmente (fallback quando a transcrição falhou no
+// fim da reunião). Transcreve no servidor e cria a reunião.
+const resendBtn = document.getElementById('resend-btn');
+const resendFile = document.getElementById('resend-file');
+resendBtn.addEventListener('click', () => resendFile.click());
+resendFile.addEventListener('change', async () => {
+  const file = resendFile.files[0];
+  if (!file) return;
+  const label = resendBtn.textContent;
+  resendBtn.disabled = true;
+  resendBtn.textContent = '⏳ Transcrevendo… (pode levar ~1 min)';
+  try {
+    const fd = new FormData();
+    fd.append('mixed', file, file.name);
+    fd.append('title', file.name.replace(/\.[^.]+$/, '') || 'Áudio reenviado');
+    fd.append('durationMs', '0');
+    fd.append('summarize', 'true');
+    const res = await api('/api/meetings/finalize', { method: 'POST', body: fd });
+    if (res.status === 401) return showLogin();
+    if (!res.ok) throw new Error(`Servidor respondeu ${res.status}`);
+    const m = await res.json();
+    await loadMeetings();
+    openMeeting(m.id);
+  } catch (err) {
+    alert(`Falha ao reenviar o áudio: ${err.message}`);
+  } finally {
+    resendBtn.disabled = false;
+    resendBtn.textContent = label;
+    resendFile.value = '';
+  }
+});
+
 // Monta o menu de vendedores (admin).
 async function populateOwners() {
   const res = await api('/api/users');

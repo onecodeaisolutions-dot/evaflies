@@ -198,8 +198,15 @@ app.post(
     );
     const [selfSegs, otherSegs] = await Promise.all(jobs);
 
-    const segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
-    const transcript = segments.map((s) => `${s.speaker}: ${s.text}`).join('\n');
+    let segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+    // Reenvio de áudio salvo: só veio o arquivo mixado -> transcreve sem separar.
+    if (!segments.length && mixed && mixed.size > 1200) {
+      const segs = await transcribeVerbose(mixed.buffer, 'mixed.webm');
+      segments = segs.map((s) => ({ ...s, speaker: null }));
+    }
+    const transcript = segments
+      .map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text))
+      .join('\n');
 
     // 3) Resumo.
     let summary = null;

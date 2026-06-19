@@ -1,5 +1,7 @@
 // Camada fina sobre o SDK da OpenAI: transcrição de áudio e geração de resumo.
 import OpenAI, { toFile } from 'openai';
+import nodeFetch from 'node-fetch';
+import FormData from 'form-data';
 
 const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || 'gpt-4o-transcribe';
 const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-4o-mini';
@@ -39,8 +41,9 @@ async function withRetry(fn, label = 'openai') {
     } catch (err) {
       lastErr = err;
       const msg = String(err?.message || err);
-      const retryable =
-        transient.test(msg) || err?.name === 'APIConnectionError' || Number(err?.status) >= 500;
+      const status = Number(err?.status);
+      if (status >= 400 && status < 500) break; // erro de cliente: repetir não adianta
+      const retryable = transient.test(msg) || err?.name === 'APIConnectionError' || status >= 500;
       if (!retryable || attempt === 4) break;
       const wait = 1500 * attempt;
       console.warn(`OpenAI ${label}: tentativa ${attempt} falhou (${msg.slice(0, 90)}). Repetindo em ${wait}ms…`);
@@ -86,19 +89,38 @@ export async function transcribe(buffer, filename = 'audio.webm', mimetype = 'au
  * @returns {Promise<Array<{startMs:number,endMs:number,text:string}>>}
  */
 export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
-  const openai = getClient();
-  // Recria o arquivo a cada tentativa para o retry poder reenviar o corpo.
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
+  }
+  // IMPORTANTE: chamamos a OpenAI direto via node-fetch + form-data (Node https),
+  // NÃO pelo fetch nativo do Node (undici), que no Render free derrubava o upload
+  // com "Premature close". O form-data manda o áudio com Content-Length correto.
   const result = await withRetry(async () => {
-    const file = await toFile(buffer, filename, { type: mimetype });
-    return openai.audio.transcriptions.create({
-      file,
-      model: 'whisper-1',
-      language: TRANSCRIBE_LANGUAGE,
-      prompt: TRANSCRIBE_PROMPT,
-      response_format: 'verbose_json', // já traz os segmentos com tempo
-      temperature: 0,
+    const form = new FormData();
+    form.append('file', buffer, { filename, contentType: mimetype });
+    form.append('model', 'whisper-1');
+    form.append('language', TRANSCRIBE_LANGUAGE);
+    form.append('prompt', TRANSCRIBE_PROMPT);
+    form.append('response_format', 'verbose_json'); // já traz os segmentos com tempo
+    form.append('temperature', '0');
+
+    const res = await nodeFetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...form.getHeaders(),
+      },
+      body: form,
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      const err = new Error(`OpenAI ${res.status}: ${detail.slice(0, 200)}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
   }, 'transcribeVerbose');
+
   const segs = Array.isArray(result.segments) ? result.segments : [];
   return segs
     // descarta trechos sem fala (reduz alucinação em silêncio).

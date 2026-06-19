@@ -57,7 +57,7 @@ async function postFinalize(form) {
       await sleep(delays[i]);
     }
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 240000); // transcrição pode levar ~1min
+    const timer = setTimeout(() => ctrl.abort(), 300000); // transcreve 2 canais em sequência
     try {
       const res = await fetch(url, {
         method: 'POST',

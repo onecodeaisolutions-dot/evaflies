@@ -180,23 +180,25 @@ app.post(
       audioId = await saveAudio(mixed.buffer, mixed.mimetype || 'audio/webm');
     }
 
-    // 2) Transcreve os dois canais em paralelo, cada um com seu falante.
-    const jobs = [];
+    // 2) Transcreve os dois canais EM SEQUÊNCIA (não em paralelo): dois uploads
+    //    grandes simultâneos saturam a banda do host e derrubam a conexão com a
+    //    OpenAI ("Premature close").
     const sf = files.self?.[0];
     const ot = files.others?.[0];
-    jobs.push(
+    const selfSegs =
       sf && sf.size > 1200
-        ? transcribeVerbose(sf.buffer, 'self.webm').then((segs) =>
-            segs.map((s) => ({ ...s, speaker: selfName || 'Você' })))
-        : Promise.resolve([])
-    );
-    jobs.push(
+        ? (await transcribeVerbose(sf.buffer, 'self.webm')).map((s) => ({
+            ...s,
+            speaker: selfName || 'Você',
+          }))
+        : [];
+    const otherSegs =
       ot && ot.size > 1200
-        ? transcribeVerbose(ot.buffer, 'others.webm').then((segs) =>
-            segs.map((s) => ({ ...s, speaker: othersName || 'Cliente' })))
-        : Promise.resolve([])
-    );
-    const [selfSegs, otherSegs] = await Promise.all(jobs);
+        ? (await transcribeVerbose(ot.buffer, 'others.webm')).map((s) => ({
+            ...s,
+            speaker: othersName || 'Cliente',
+          }))
+        : [];
 
     let segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
     // Reenvio de áudio salvo: só veio o arquivo mixado -> transcreve sem separar.

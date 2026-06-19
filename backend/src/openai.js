@@ -18,9 +18,36 @@ export function getClient() {
     throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
   }
   if (!client) {
-    client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 4, // o SDK já repete em erros de conexão/5xx
+      timeout: 120000, // upload de áudio pode demorar
+    });
   }
   return client;
+}
+
+// Repete uma operação em erros transitórios de rede (ex.: "Premature close",
+// ECONNRESET) — comum em uploads de áudio a partir de hosts com banda limitada.
+async function withRetry(fn, label = 'openai') {
+  const transient =
+    /premature close|econnreset|econnrefused|terminated|socket hang up|fetch failed|network|etimedout|epipe|aborted|enotfound/i;
+  let lastErr;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      const retryable =
+        transient.test(msg) || err?.name === 'APIConnectionError' || Number(err?.status) >= 500;
+      if (!retryable || attempt === 4) break;
+      const wait = 1500 * attempt;
+      console.warn(`OpenAI ${label}: tentativa ${attempt} falhou (${msg.slice(0, 90)}). Repetindo em ${wait}ms…`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -60,16 +87,19 @@ export async function transcribe(buffer, filename = 'audio.webm', mimetype = 'au
  */
 export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
   const openai = getClient();
-  const file = await toFile(buffer, filename, { type: mimetype });
-  const result = await openai.audio.transcriptions.create({
-    file,
-    model: 'whisper-1',
-    language: TRANSCRIBE_LANGUAGE,
-    prompt: TRANSCRIBE_PROMPT,
-    response_format: 'verbose_json',
-    timestamp_granularities: ['segment'],
-    temperature: 0,
-  });
+  // Recria o arquivo a cada tentativa para o retry poder reenviar o corpo.
+  const result = await withRetry(async () => {
+    const file = await toFile(buffer, filename, { type: mimetype });
+    return openai.audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      language: TRANSCRIBE_LANGUAGE,
+      prompt: TRANSCRIBE_PROMPT,
+      response_format: 'verbose_json',
+      timestamp_granularities: ['segment'],
+      temperature: 0,
+    });
+  }, 'transcribeVerbose');
   const segs = Array.isArray(result.segments) ? result.segments : [];
   return segs
     // descarta trechos sem fala (reduz alucinação em silêncio).

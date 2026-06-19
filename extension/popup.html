@@ -24,6 +24,10 @@
       <label for="accessKey">Código de acesso</label>
       <div class="row">
         <input id="accessKey" type="password" placeholder="código do vendedor" />
+      </div>
+      <label for="autoStop">Parar sozinho após silêncio (min · 0 = desligado)</label>
+      <div class="row">
+        <input id="autoStop" type="number" min="0" max="60" step="1" placeholder="5" />
         <button id="saveSettings" class="btn-sm">Salvar</button>
       </div>
       <div class="row">

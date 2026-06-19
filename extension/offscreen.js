@@ -15,6 +15,8 @@ let mixedRec = null;
 let micRec = null;
 let tabRec = null;
 
+let silenceTimer = null;
+let stopping = false;
 let running = false;
 let sessionStartMs = 0;
 let backendUrl = '';
@@ -143,28 +145,64 @@ async function startCapture(streamId, opts) {
   // 3) Mix para o áudio de playback + devolver a aba aos alto-falantes.
   audioContext = new AudioContext();
   const dest = audioContext.createMediaStreamDestination();
+  const analyser = audioContext.createAnalyser(); // mede o nível p/ auto-parada
+  analyser.fftSize = 2048;
   const tabSource = audioContext.createMediaStreamSource(tabStream);
   tabSource.connect(dest);
+  tabSource.connect(analyser);
   tabSource.connect(audioContext.destination); // você continua ouvindo
-  if (micStream) audioContext.createMediaStreamSource(micStream).connect(dest);
+  if (micStream) {
+    const micSource = audioContext.createMediaStreamSource(micStream);
+    micSource.connect(dest);
+    micSource.connect(analyser);
+  }
   mixedStream = dest.stream;
 
   sessionStartMs = Date.now();
   running = true;
+  stopping = false;
 
   // 4) Gravações contínuas.
   mixedRec = makeRecorder(mixedStream, MIXED_BPS);
   tabRec = makeRecorder(tabStream, CHANNEL_BPS);
   micRec = micStream ? makeRecorder(micStream, CHANNEL_BPS) : null;
 
+  // 5) Auto-parada por silêncio (reunião encerrada sem fechar a aba).
+  const autoStopMs = Number(opts.autoStopSilenceMin || 0) * 60000;
+  if (autoStopMs > 0) startSilenceWatch(analyser, autoStopMs);
+
   status(micStream ? 'Gravando (aba + microfone)…' : 'Gravando (aba)…');
+}
+
+// Para sozinho após autoStopMs de silêncio total (ninguém falando).
+function startSilenceWatch(analyser, autoStopMs) {
+  const buf = new Float32Array(analyser.fftSize);
+  let lastLoud = Date.now();
+  silenceTimer = setInterval(() => {
+    if (!running) return;
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    if (rms > 0.01) {
+      lastLoud = Date.now(); // alguém falou
+    } else if (Date.now() - lastLoud >= autoStopMs) {
+      const mins = Math.round(autoStopMs / 60000);
+      status(`Sem áudio há ${mins} min — encerrando e transcrevendo…`);
+      send({ type: 'CAPTURE_STOPPING' }); // avisa o background p/ congelar o tempo
+      stopCapture();
+    }
+  }, 3000);
 }
 
 // --------------------------------------------------------------------------
 // Fim: para tudo e manda para o backend processar.
 // --------------------------------------------------------------------------
 async function stopCapture() {
+  if (stopping) return; // evita parar duas vezes (auto-parada + clique manual)
+  stopping = true;
   running = false;
+  if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
   [mixedRec, micRec, tabRec].forEach((r) => {
     if (r && r.rec.state !== 'inactive') r.rec.stop();
   });
@@ -211,6 +249,7 @@ function cleanup() {
   [tabStream, micStream, mixedStream].forEach((s) => {
     if (s) s.getTracks().forEach((t) => t.stop());
   });
+  if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
   if (audioContext && audioContext.state !== 'closed') audioContext.close();
   audioContext = mixedStream = tabStream = micStream = null;
   mixedRec = micRec = tabRec = null;

@@ -84,6 +84,10 @@ function setRecBadge(state) {
 }
 
 async function startRecording() {
+  const existing = await getSession();
+  if (existing && (existing.recording || existing.processing)) {
+    throw new Error('Já há uma gravação em andamento ou processando.');
+  }
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -94,7 +98,9 @@ async function startRecording() {
 
   await setSession({
     recording: true,
+    processing: false,
     startedAt: Date.now(),
+    endedAt: null,
     tabId: tab.id,
     tabTitle: tab.title || 'Reunião',
     transcript: '',
@@ -117,6 +123,7 @@ async function startRecording() {
     othersName: settings.othersName,
     accessKey: settings.accessKey,
     tabTitle: tab.title || 'Reunião',
+    autoStopSilenceMin: settings.autoStopSilenceMin,
   }).catch(() => {});
 
   broadcast({ type: 'SESSION_UPDATE' });
@@ -124,7 +131,8 @@ async function startRecording() {
 
 async function stopRecording() {
   setRecBadge('proc');
-  await patchSession({ status: 'Finalizando…' });
+  // A captura para AGORA: congela o cronômetro e entra em "processando".
+  await patchSession({ recording: false, processing: true, endedAt: Date.now(), status: 'Finalizando…' });
   chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP_CAPTURE' }).catch(() => {});
   broadcast({ type: 'SESSION_UPDATE' });
 }
@@ -136,6 +144,7 @@ async function finalize(meeting, errorMsg) {
   if (meeting) {
     await patchSession({
       recording: false,
+      processing: false,
       status: 'Concluído ✅',
       meeting,
       transcript: meeting.transcript || '',
@@ -144,6 +153,7 @@ async function finalize(meeting, errorMsg) {
   } else {
     await patchSession({
       recording: false,
+      processing: false,
       status: errorMsg ? `Erro: ${errorMsg}` : 'Sem transcrição.',
     });
   }
@@ -200,9 +210,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
 
+      // Offscreen parou sozinho (silêncio): entra em "processando" e congela o tempo.
+      case 'CAPTURE_STOPPING':
+        setRecBadge('proc');
+        await patchSession({ recording: false, processing: true, endedAt: Date.now() });
+        broadcast({ type: 'SESSION_UPDATE' });
+        sendResponse({ ok: true });
+        break;
+
       case 'CAPTURE_ERROR':
         setRecBadge(null);
-        await patchSession({ recording: false, status: `Erro: ${message.error}` });
+        await patchSession({ recording: false, processing: false, status: `Erro: ${message.error}` });
         await closeOffscreen();
         broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });

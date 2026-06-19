@@ -17,6 +17,7 @@ const els = {
   backendUrl: $('backendUrl'),
   userName: $('userName'),
   accessKey: $('accessKey'),
+  autoStop: $('autoStop'),
   saveSettings: $('saveSettings'),
   checkHealth: $('checkHealth'),
   grantMic: $('grantMic'),
@@ -28,21 +29,36 @@ const els = {
 };
 
 let settings = null;
+let sessionActive = false; // gravando ou processando
 
 // --------------------------------------------------------------------------
 // Render
 // --------------------------------------------------------------------------
 function renderSession(session) {
   const recording = session?.recording;
-  els.recordBtn.textContent = recording ? '⏹ Parar' : '▶ Gravar';
+  const processing = session?.processing;
+  sessionActive = !!(recording || processing);
+
+  if (recording) {
+    els.recordBtn.textContent = '⏹ Parar';
+  } else if (processing) {
+    els.recordBtn.textContent = '⏳ Processando…';
+  } else {
+    els.recordBtn.textContent = '▶ Gravar';
+  }
   els.recordBtn.classList.toggle('recording', !!recording);
+  els.recordBtn.disabled = !!processing; // não dá pra gravar enquanto finaliza
 
   els.status.textContent = session?.status || 'Pronto.';
 
   if (session?.startedAt) {
-    const secs = Math.round((Date.now() - session.startedAt) / 1000);
     if (recording) {
+      const secs = Math.round((Date.now() - session.startedAt) / 1000);
       els.meta.textContent = `Gravando · ${secs}s`;
+    } else if (processing) {
+      // Cronômetro CONGELADO no momento em que a captura parou.
+      const secs = Math.round(((session.endedAt || Date.now()) - session.startedAt) / 1000);
+      els.meta.textContent = `Gravou ${secs}s · processando…`;
     } else {
       const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
       els.meta.textContent = segCount ? `${segCount} trecho(s) transcrito(s)` : '';
@@ -93,6 +109,7 @@ async function refresh() {
 // --------------------------------------------------------------------------
 els.recordBtn.addEventListener('click', async () => {
   const { session } = await chrome.runtime.sendMessage({ target: 'background', type: 'GET_SESSION' });
+  if (session?.processing) return; // ignora cliques durante o processamento
   const type = session?.recording ? 'STOP' : 'START';
   els.recordBtn.disabled = true;
   try {
@@ -112,7 +129,8 @@ els.saveSettings.addEventListener('click', async () => {
   const url = els.backendUrl.value.trim().replace(/\/$/, '');
   const userName = els.userName.value.trim() || 'Você';
   const accessKey = els.accessKey.value.trim();
-  settings = await saveSettings({ backendUrl: url, userName, accessKey });
+  const autoStopSilenceMin = Math.max(0, Math.min(60, parseInt(els.autoStop.value, 10) || 0));
+  settings = await saveSettings({ backendUrl: url, userName, accessKey, autoStopSilenceMin });
   els.settingsStatus.textContent = 'Configurações salvas.';
   els.settingsStatus.className = 'muted ok';
 });
@@ -209,7 +227,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Atualiza o cronômetro/UI periodicamente enquanto o popup está aberto.
 setInterval(() => {
-  if (els.recordBtn.classList.contains('recording')) refresh();
+  if (sessionActive) refresh();
 }, 1500);
 
 // --------------------------------------------------------------------------
@@ -220,5 +238,6 @@ setInterval(() => {
   els.backendUrl.value = settings.backendUrl;
   els.userName.value = settings.userName || 'Você';
   els.accessKey.value = settings.accessKey || '';
+  els.autoStop.value = settings.autoStopSilenceMin ?? 5;
   await refresh();
 })();

@@ -95,8 +95,7 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
       model: 'whisper-1',
       language: TRANSCRIBE_LANGUAGE,
       prompt: TRANSCRIBE_PROMPT,
-      response_format: 'verbose_json',
-      timestamp_granularities: ['segment'],
+      response_format: 'verbose_json', // já traz os segmentos com tempo
       temperature: 0,
     });
   }, 'transcribeVerbose');

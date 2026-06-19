@@ -5,6 +5,21 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setGlobalDispatcher, Agent } from 'undici';
+
+// O fetch nativo do Node (undici) às vezes derruba uploads grandes para a OpenAI
+// com "Premature close" em hosts com rede instável (ex.: Render free). Um Agent
+// com timeouts generosos e conexões novas (sem reaproveitar socket meio-fechado)
+// torna o upload da transcrição muito mais confiável.
+setGlobalDispatcher(
+  new Agent({
+    connect: { timeout: 30_000 },
+    headersTimeout: 300_000,
+    bodyTimeout: 300_000,
+    keepAliveTimeout: 10_000,
+    keepAliveMaxTimeout: 60_000,
+  })
+);
 
 import { transcribe, transcribeVerbose, summarize, config } from './src/openai.js';
 import {

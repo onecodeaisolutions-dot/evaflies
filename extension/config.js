@@ -12,6 +12,9 @@ export const DEFAULTS = {
   othersName: 'Cliente',
   // Código de acesso do vendedor (separa as reuniões por usuário no painel).
   accessKey: '',
+  // Para a gravação sozinha após N minutos de silêncio total (ninguém falando)
+  // — útil quando a reunião acaba sem fechar a aba. 0 = desativado.
+  autoStopSilenceMin: 5,
 };
 
 const STORAGE_KEY = 'evaflies_settings';

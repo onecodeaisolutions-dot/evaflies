@@ -122,14 +122,31 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
   }, 'transcribeVerbose');
 
   const segs = Array.isArray(result.segments) ? result.segments : [];
-  return segs
-    // descarta trechos sem fala (reduz alucinação em silêncio).
-    .filter((s) => (s.text || '').trim() && (s.no_speech_prob == null || s.no_speech_prob < 0.6))
+  const cleaned = segs
+    // descarta trechos sem fala ou de baixa confiança (reduz alucinação em silêncio).
+    .filter(
+      (s) =>
+        (s.text || '').trim() &&
+        (s.no_speech_prob == null || s.no_speech_prob < 0.6) &&
+        (s.avg_logprob == null || s.avg_logprob > -1.0)
+    )
     .map((s) => ({
       startMs: Math.round((s.start || 0) * 1000),
       endMs: Math.round((s.end || 0) * 1000),
       text: (s.text || '').trim(),
     }));
+
+  // Colapsa repetições consecutivas idênticas (ex.: "E aí / E aí / E aí").
+  const out = [];
+  for (const s of cleaned) {
+    const prev = out[out.length - 1];
+    if (prev && prev.text.toLowerCase() === s.text.toLowerCase()) {
+      prev.endMs = s.endMs; // só estende o tempo do anterior
+      continue;
+    }
+    out.push(s);
+  }
+  return out;
 }
 
 /**

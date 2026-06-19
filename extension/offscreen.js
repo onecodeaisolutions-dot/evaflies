@@ -26,7 +26,8 @@ let othersName = 'Cliente';
 let title = 'Reunião';
 
 const MIXED_BPS = 32000; // áudio de playback (voz)
-const CHANNEL_BPS = 24000; // canais p/ transcrição (leve, cabe no limite da API)
+const CHANNEL_BPS = 48000; // canais p/ transcrição: 48k melhora a precisão e ainda
+                           // cabe ~1h no limite de 25MB da API da OpenAI
 
 function send(message) {
   chrome.runtime.sendMessage({ target: 'background', ...message }).catch(() => {});

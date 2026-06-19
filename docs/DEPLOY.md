@@ -42,7 +42,7 @@ ficam no Supabase (free): Postgres para as reuniões + Storage para os áudios.
    - `OPENAI_API_KEY` — sua chave da OpenAI.
    - `SUPABASE_URL` — a Project URL do Supabase.
    - `SUPABASE_SERVICE_ROLE_KEY` — a service_role key do Supabase.
-   - As demais (`TRANSCRIBE_MODEL`, `SUMMARY_MODEL`, etc.) já vêm do `render.yaml`.
+   - As demais (`SUMMARY_MODEL`, `TRANSCRIBE_LANGUAGE`, etc.) já vêm do `render.yaml`.
    > Com `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` definidos, o backend usa
    > o Supabase automaticamente. Sem eles, cai no modo arquivo local.
 

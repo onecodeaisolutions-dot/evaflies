@@ -8,8 +8,8 @@ O projeto tem duas partes:
 
 | Parte | Pasta | O que faz |
 |-------|-------|-----------|
-| **Backend** | [`backend/`](backend/) | Servidor Node/Express que guarda a chave da OpenAI, faz proxy para transcrição (`/api/transcribe`) e resumo (`/api/summarize`), **salva o áudio completo** (`/api/audio`), armazena as reuniões (`/api/meetings`) e serve o **painel web**. |
-| **Extensão** | [`extension/`](extension/) | Extensão Chrome (Manifest V3) que captura áudio da aba + microfone, envia em blocos para o backend e mostra a transcrição ao vivo. |
+| **Backend** | [`backend/`](backend/) | Servidor Node/Express que guarda a chave da OpenAI, faz proxy para transcrição + resumo (`/api/meetings/finalize`, `/api/summarize`), **salva o áudio completo** (`/api/audio`), armazena as reuniões (`/api/meetings`) e serve o **painel web**. |
+| **Extensão** | [`extension/`](extension/) | Extensão Chrome (Manifest V3) que captura áudio da aba + microfone e, **ao parar a gravação**, envia tudo para o backend transcrever (melhor qualidade). |
 | **Painel** | [`backend/public/`](backend/public/) | Dashboard estilo Fireflies: cada reunião é uma linha; ao clicar abre a **gravação de áudio** + a **transcrição minuto a minuto** (timestamps clicáveis que dão seek no áudio) + o resumo. |
 
 A chave da OpenAI **nunca** vai para a extensão — fica só no backend.
@@ -48,7 +48,6 @@ Variáveis de ambiente (`.env`):
 |----------|--------|-----------|
 | `OPENAI_API_KEY` | — | **Obrigatória.** Sua chave da OpenAI. |
 | `PORT` | `3000` | Porta do servidor. |
-| `TRANSCRIBE_MODEL` | `gpt-4o-transcribe` | Modelo de transcrição (`gpt-4o-transcribe`, `gpt-4o-mini-transcribe` ou `whisper-1`). |
 | `SUMMARY_MODEL` | `gpt-4o-mini` | Modelo usado para gerar o resumo / action items. |
 | `TRANSCRIBE_LANGUAGE` | `pt` | Idioma esperado da fala (ISO-639-1). |
 | `CORS_ORIGIN` | `*` | Origem permitida para CORS. |

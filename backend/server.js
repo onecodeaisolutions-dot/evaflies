@@ -21,7 +21,7 @@ setGlobalDispatcher(
   })
 );
 
-import { transcribe, transcribeVerbose, summarize, config } from './src/openai.js';
+import { transcribeVerbose, summarize, config } from './src/openai.js';
 import {
   initStore,
   ping,
@@ -43,12 +43,6 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json({ limit: '10mb' }));
-
-// Upload de BLOCO para transcrição: em memória, limite 25MB (limite da OpenAI).
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
-});
 
 // Upload do ÁUDIO COMPLETO da reunião: em memória (vai para o storage), limite 200MB.
 const uploadAudio = multer({
@@ -92,21 +86,6 @@ app.get('/api/users', requireUser, (req, res) => {
   if (!req.user || !req.user.admin) return res.status(403).json({ error: 'Apenas admin.' });
   res.json(listUsers());
 });
-
-// --- Transcrição de um bloco ---------------------------------------------
-app.post(
-  '/api/transcribe',
-  requireUser,
-  upload.single('audio'),
-  wrap(async (req, res) => {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Envie um arquivo no campo "audio".' });
-    }
-    const filename = req.file.originalname || 'chunk.webm';
-    const text = await transcribe(req.file.buffer, filename, req.file.mimetype);
-    res.json({ text });
-  })
-);
 
 // --- Áudio completo da reunião -------------------------------------------
 // Upload do áudio gravado (devolve um audioId para vincular à reunião).

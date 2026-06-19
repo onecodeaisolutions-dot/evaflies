@@ -1,9 +1,12 @@
 // Camada fina sobre o SDK da OpenAI: transcrição de áudio e geração de resumo.
-import OpenAI, { toFile } from 'openai';
+import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
 
-const TRANSCRIBE_MODEL = process.env.TRANSCRIBE_MODEL || 'gpt-4o-transcribe';
+// Modelo de transcrição: fixo em whisper-1 porque é o único que devolve
+// timestamps por segmento (verbose_json) — necessários para intercalar os
+// canais (vendedor/cliente) em ordem cronológica.
+const TRANSCRIBE_MODEL = 'whisper-1';
 const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-4o-mini';
 const TRANSCRIBE_LANGUAGE = process.env.TRANSCRIBE_LANGUAGE || 'pt';
 // Prompt de contexto: ajuda o modelo a manter o idioma (pt-BR) e o vocabulário
@@ -54,33 +57,6 @@ async function withRetry(fn, label = 'openai') {
 }
 
 /**
- * Transcreve um bloco de áudio.
- * @param {Buffer} buffer  conteúdo do arquivo de áudio
- * @param {string} filename  nome com extensão (ex: "chunk.webm")
- * @param {string} [mimetype]
- * @returns {Promise<string>} texto transcrito
- */
-export async function transcribe(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
-  const openai = getClient();
-  const file = await toFile(buffer, filename, { type: mimetype });
-
-  const params = {
-    file,
-    model: TRANSCRIBE_MODEL,
-    language: TRANSCRIBE_LANGUAGE,
-    prompt: TRANSCRIBE_PROMPT,
-  };
-  // whisper-1 aceita response_format e temperatura (0 = menos alucinação).
-  if (TRANSCRIBE_MODEL === 'whisper-1') {
-    params.response_format = 'json';
-    params.temperature = 0;
-  }
-
-  const result = await openai.audio.transcriptions.create(params);
-  return (result.text || '').trim();
-}
-
-/**
  * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo (para intercalar
  * canais). Usa whisper-1 (verbose_json) que retorna timestamps por segmento.
  * @param {Buffer} buffer
@@ -98,7 +74,7 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
   const result = await withRetry(async () => {
     const form = new FormData();
     form.append('file', buffer, { filename, contentType: mimetype });
-    form.append('model', 'whisper-1');
+    form.append('model', TRANSCRIBE_MODEL);
     form.append('language', TRANSCRIBE_LANGUAGE);
     form.append('prompt', TRANSCRIBE_PROMPT);
     form.append('response_format', 'verbose_json'); // já traz os segmentos com tempo

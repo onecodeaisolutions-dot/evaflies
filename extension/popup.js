@@ -1,4 +1,5 @@
-// Lógica do popup: controla gravação, mostra a transcrição ao vivo e o resumo.
+// Lógica do popup: controla a gravação e mostra a transcrição + resumo (gerados
+// ao parar a gravação).
 import { getSettings, saveSettings } from './config.js';
 
 const $ = (id) => document.getElementById(id);

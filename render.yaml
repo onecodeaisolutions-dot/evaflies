@@ -21,8 +21,6 @@ services:
         value: meeting-audio
       - key: NODE_VERSION
         value: "22"
-      - key: TRANSCRIBE_MODEL
-        value: gpt-4o-transcribe
       - key: SUMMARY_MODEL
         value: gpt-4o-mini
       - key: TRANSCRIBE_LANGUAGE

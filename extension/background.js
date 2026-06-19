@@ -118,7 +118,6 @@ async function startRecording() {
     type: 'START_CAPTURE',
     streamId,
     backendUrl: settings.backendUrl,
-    chunkMs: settings.chunkMs,
     userName: settings.userName,
     othersName: settings.othersName,
     accessKey: settings.accessKey,

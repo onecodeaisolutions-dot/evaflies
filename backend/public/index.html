@@ -87,27 +87,21 @@
 
       <div class="player">
         <div class="player-glow"></div>
-        <div class="player-row">
-          <button class="play-btn" title="Reproduzir / pausar">►</button>
-          <div class="wave-wrap">
-            <div class="waveform" title="Clique para navegar no áudio"></div>
-            <div class="wave-times">
-              <span class="t-cur">0:00</span>
-              <span class="t-dur">0:00</span>
-            </div>
-          </div>
-          <button class="vol-btn" title="Silenciar / ativar som">🔊</button>
+        <button class="play-btn" title="Reproduzir / pausar">►</button>
+        <span class="t-cur" title="Tempo atual">0:00</span>
+        <div class="seekbar" title="Clique ou arraste para escolher o tempo">
+          <div class="seek-fill"></div>
+          <div class="seek-thumb"></div>
         </div>
-        <div class="speed-row">
-          <span class="speed-label">VELOCIDADE</span>
-          <div class="speed-btns">
-            <button data-speed="1" class="speed-btn">1x</button>
-            <button data-speed="1.25" class="speed-btn">1.25x</button>
-            <button data-speed="1.5" class="speed-btn">1.5x</button>
-            <button data-speed="1.75" class="speed-btn">1.75x</button>
-            <button data-speed="2" class="speed-btn">2x</button>
-          </div>
+        <span class="t-dur" title="Duração total">0:00</span>
+        <div class="speed-group" title="Velocidade de reprodução">
+          <button data-speed="1" class="speed-btn">1x</button>
+          <button data-speed="1.25" class="speed-btn">1.25x</button>
+          <button data-speed="1.5" class="speed-btn">1.5x</button>
+          <button data-speed="1.75" class="speed-btn">1.75x</button>
+          <button data-speed="2" class="speed-btn">2x</button>
         </div>
+        <button class="vol-btn" title="Silenciar / ativar som">🔊</button>
         <audio class="audio-el" preload="metadata"></audio>
       </div>
       <p class="no-audio hidden">Sem áudio salvo para esta reunião.</p>

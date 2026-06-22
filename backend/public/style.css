@@ -296,7 +296,7 @@ input::placeholder { color: #52617a; }
 }
 
 /* Main ------------------------------------------------------------------- */
-.main { height: 100vh; overflow-y: auto; padding: 30px 38px 60px; }
+.main { height: 100vh; overflow-y: auto; padding: 30px 38px 120px; }
 .empty { max-width: 460px; margin: 16vh auto; text-align: center; color: var(--meta); }
 .empty h1 { color: var(--title); font-family: var(--font-display); font-weight: 600; }
 
@@ -352,67 +352,61 @@ input::placeholder { color: #52617a; }
 .btn-danger { background: rgba(255, 90, 110, 0.06); border-color: rgba(255, 90, 110, 0.28); color: var(--danger-text); }
 .btn-danger:hover { background: rgba(255, 90, 110, 0.13); border-color: rgba(255, 90, 110, 0.5); color: var(--danger-text); }
 
-/* Player customizado ----------------------------------------------------- */
+/* Player fixo no rodapé -------------------------------------------------- */
 .player {
-  position: relative;
-  margin-top: 24px;
-  padding: 20px 22px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(13, 20, 33, 0.9), rgba(9, 13, 23, 0.9));
-  border: 1px solid rgba(176, 107, 255, 0.16);
-  overflow: hidden;
-  box-shadow: 0 18px 50px -20px rgba(0, 0, 0, 0.7);
+  position: fixed;
+  left: 344px;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 38px;
+  background: linear-gradient(180deg, rgba(13, 20, 33, 0.97), rgba(7, 10, 18, 0.99));
+  border-top: 1px solid rgba(176, 107, 255, 0.2);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -18px 50px -24px rgba(0, 0, 0, 0.85);
 }
+body.share-mode .player { left: 0; }
 .player-glow { position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(176, 107, 255, 0.55), transparent); }
-.player-row { display: flex; align-items: center; gap: 18px; }
 
 .play-btn {
   flex: none;
-  width: 50px;
-  height: 50px;
-  border-radius: 14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 17px;
+  font-size: 16px;
   padding-left: 3px;
   color: var(--bg);
   border: none;
   background: linear-gradient(145deg, #c79bff, #8a3fe0);
-  box-shadow: 0 0 22px rgba(176, 107, 255, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 22px rgba(176, 107, 255, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
-.play-btn.playing { font-size: 14px; padding-left: 0; }
+.play-btn.playing { font-size: 13px; padding-left: 0; }
 
-.wave-wrap { flex: 1; min-width: 0; }
-.waveform { display: flex; align-items: flex-end; gap: 2px; height: 44px; cursor: pointer; }
-.bar {
-  flex: 1 1 0;
-  min-width: 0;
-  border-radius: 2px;
-  background: rgba(120, 140, 170, 0.16);
-  transition: background 0.15s, box-shadow 0.15s;
-}
-.bar.active { background: linear-gradient(180deg, #c79bff, #6d2fb8); box-shadow: 0 0 5px rgba(176, 107, 255, 0.4); }
-.bar.head { box-shadow: 0 0 10px rgba(176, 107, 255, 0.95); }
+.t-cur, .t-dur { flex: none; font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; min-width: 44px; }
+.t-cur { color: var(--accent); text-align: right; }
+.t-dur { color: var(--meta2); }
 
-.wave-times { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-family: var(--font-mono); font-size: 12px; }
-.wave-times .t-cur { color: var(--accent); }
-.wave-times .t-dur { color: var(--meta2); }
+/* Barra de progresso (clique + arraste) */
+.seekbar { position: relative; flex: 1; min-width: 0; height: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.1); cursor: pointer; touch-action: none; }
+.seekbar::before { content: ""; position: absolute; left: 0; right: 0; top: -10px; bottom: -10px; } /* área de clique maior */
+.seek-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 99px; background: linear-gradient(90deg, #8a3fe0, #c79bff); box-shadow: 0 0 12px rgba(176, 107, 255, 0.55); pointer-events: none; }
+.seek-thumb { position: absolute; top: 50%; left: 0; transform: translate(-50%, -50%); width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(176, 107, 255, 0.3), 0 0 10px rgba(176, 107, 255, 0.85); pointer-events: none; transition: width 0.12s, height 0.12s; }
+.seekbar:hover .seek-thumb { width: 17px; height: 17px; }
 
-.vol-btn { flex: none; color: var(--meta2); font-size: 18px; background: transparent; border: none; cursor: pointer; transition: color 0.15s; }
-.vol-btn:hover { color: var(--accent); }
-.vol-btn.muted { color: #3a4659; }
-
-.speed-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
-.speed-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.5px; color: var(--meta2); }
-.speed-btns { display: flex; gap: 7px; }
+.speed-group { flex: none; display: flex; gap: 5px; }
 .speed-btn {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
-  padding: 6px 13px;
-  border-radius: 9px;
+  padding: 6px 10px;
+  border-radius: 8px;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -426,6 +420,10 @@ input::placeholder { color: #52617a; }
   color: var(--accent);
   box-shadow: 0 0 14px -4px rgba(176, 107, 255, 0.7);
 }
+
+.vol-btn { flex: none; color: var(--meta2); font-size: 17px; background: transparent; border: none; cursor: pointer; transition: color 0.15s; }
+.vol-btn:hover { color: var(--accent); }
+.vol-btn.muted { color: #3a4659; }
 
 .no-audio { color: var(--meta); margin-top: 20px; }
 
@@ -637,7 +635,9 @@ body.share-mode .sidebar { display: none; }
 @media (max-width: 880px) {
   body { grid-template-columns: 1fr; }
   .sidebar { height: auto; max-height: 46vh; }
-  .main { height: auto; }
+  .main { height: auto; padding-bottom: 150px; }
   .summary-cols { grid-template-columns: 1fr; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .player { left: 0; padding: 12px 14px; gap: 10px; flex-wrap: wrap; row-gap: 10px; }
+  .seekbar { order: -1; flex-basis: 100%; }
 }

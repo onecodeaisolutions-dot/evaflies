@@ -1,5 +1,5 @@
-// Painel web: lista de reuniões + detalhe (player com waveform + transcrição
-// sincronizada por timestamps + resumo).
+// Painel web: lista de reuniões + detalhe (player fixo com barra de progresso +
+// transcrição sincronizada por timestamps + resumo).
 
 const listEl = document.getElementById('list');
 const detailEl = document.getElementById('detail');
@@ -58,34 +58,21 @@ function makeColorFor() {
   };
 }
 
-// Waveform decorativa: 74 barras com alturas determinísticas (mesma fórmula do
-// protótipo de design). Devolve uma função update(progress) que pinta as barras.
-const BAR_COUNT = 74;
-const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
-  const v =
-    (Math.sin(i * 0.55) * 0.5 + 0.5) * 0.55 +
-    (Math.sin(i * 1.9 + 1) * 0.5 + 0.5) * 0.3 +
-    (Math.sin(i * 4.1) * 0.5 + 0.5) * 0.15;
-  return Math.max(0.12, Math.min(1, v));
-});
-
-function buildWaveform(waveEl) {
-  const bars = [];
-  for (let i = 0; i < BAR_COUNT; i++) {
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    bar.style.height = `${5 + BAR_HEIGHTS[i] * 34}px`;
-    waveEl.appendChild(bar);
-    bars.push(bar);
-  }
-  return (progress) => {
-    for (let i = 0; i < BAR_COUNT; i++) {
-      const active = i / BAR_COUNT <= progress;
-      const head = active && (i + 1) / BAR_COUNT > progress;
-      bars[i].classList.toggle('active', active);
-      bars[i].classList.toggle('head', head);
-    }
-  };
+// Auto-acompanhamento da transcrição: segue a linha que está tocando, mas pausa
+// quando o usuário rola manualmente (pra não "sequestrar" a página).
+let autoFollow = true;
+let followResumeTimer;
+function pauseAutoFollow() {
+  autoFollow = false;
+  clearTimeout(followResumeTimer);
+  followResumeTimer = setTimeout(() => { autoFollow = true; }, 6000);
+}
+// Verdadeiro se o elemento está confortavelmente visível na área de conteúdo
+// (deixa folga embaixo por causa do player fixo no rodapé).
+function isInView(el) {
+  const c = detailEl.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return r.top >= c.top + 70 && r.bottom <= c.bottom - 110;
 }
 
 // --------------------------------------------------------------------------
@@ -148,6 +135,7 @@ async function openMeeting(id) {
 
 function renderDetail(m, ctx = {}) {
   const share = ctx.share || null; // token quando estamos na view pública
+  autoFollow = true; // cada reunião começa acompanhando
   detailEl.innerHTML = '';
   const node = tpl.content.cloneNode(true);
 
@@ -172,26 +160,33 @@ function renderDetail(m, ctx = {}) {
     node.querySelector('.btn-share').addEventListener('click', () => openShareModal(m));
   }
 
-  // --- Player customizado ---
+  // --- Player (rodapé fixo) ---
   const playerEl = node.querySelector('.player');
   const noAudio = node.querySelector('.no-audio');
   const audio = node.querySelector('.audio-el');
   const playBtn = node.querySelector('.play-btn');
-  const waveEl = node.querySelector('.waveform');
+  const seekEl = node.querySelector('.seekbar');
+  const seekFill = node.querySelector('.seek-fill');
+  const seekThumb = node.querySelector('.seek-thumb');
   const tCur = node.querySelector('.t-cur');
   const tDur = node.querySelector('.t-dur');
   const volBtn = node.querySelector('.vol-btn');
   const speedBtns = node.querySelectorAll('.speed-btn');
-  const updateWave = buildWaveform(waveEl);
 
   const curDur = () =>
     audio.duration && isFinite(audio.duration) ? audio.duration : (m.durationMs || 0) / 1000;
+  const setSeekUI = (prog) => {
+    const pct = Math.max(0, Math.min(1, prog || 0)) * 100;
+    seekFill.style.width = `${pct}%`;
+    seekThumb.style.left = `${pct}%`;
+  };
 
   if (m.audioId) {
     audio.src = share ? `/api/share/${encodeURIComponent(share)}/audio` : audioUrl(m.audioId);
     audio.playbackRate = playbackSpeed;
     fixWebmDuration(audio);
     tDur.textContent = fmtTime(m.durationMs);
+    setSeekUI(0);
 
     const markSpeed = () =>
       speedBtns.forEach((b) => b.classList.toggle('active', parseFloat(b.dataset.speed) === playbackSpeed));
@@ -220,14 +215,37 @@ function renderDetail(m, ctx = {}) {
     audio.addEventListener('loadedmetadata', refreshDur);
     audio.addEventListener('durationchange', refreshDur);
 
-    waveEl.addEventListener('click', (e) => {
+    // Barra de progresso: clique em qualquer ponto OU arraste para escolher o tempo.
+    const pctFromEvent = (e) => {
+      const r = seekEl.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    };
+    let scrubbing = false;
+    seekEl.addEventListener('pointerdown', (e) => {
       const d = curDur();
       if (!d) return;
-      const r = waveEl.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-      audio.currentTime = pct * d;
-      if (audio.paused) audio.play();
+      scrubbing = true;
+      seekEl.setPointerCapture(e.pointerId);
+      const p = pctFromEvent(e);
+      setSeekUI(p);
+      audio.currentTime = p * d;
     });
+    seekEl.addEventListener('pointermove', (e) => {
+      if (!scrubbing) return;
+      const d = curDur();
+      if (!d) return;
+      const p = pctFromEvent(e);
+      setSeekUI(p);
+      tCur.textContent = fmtTime(p * d * 1000);
+      audio.currentTime = p * d;
+    });
+    const endScrub = (e) => {
+      if (!scrubbing) return;
+      scrubbing = false;
+      try { seekEl.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    seekEl.addEventListener('pointerup', endScrub);
+    seekEl.addEventListener('pointercancel', endScrub);
 
     volBtn.addEventListener('click', () => {
       audio.muted = !audio.muted;
@@ -267,6 +285,7 @@ function renderDetail(m, ctx = {}) {
     el.innerHTML = `<div class="ts">${fmtTime(seg.startMs)}</div>` + `<div class="body">${spkRow}<p class="txt">${escapeHtml(seg.text)}</p></div>`;
     el.addEventListener('click', () => {
       if (!m.audioId) return;
+      autoFollow = true; // clicou numa linha: volta a acompanhar
       audio.currentTime = (seg.startMs || 0) / 1000;
       audio.play();
     });
@@ -274,11 +293,11 @@ function renderDetail(m, ctx = {}) {
     segEls.push(el);
   }
 
-  // Destaca o trecho atual + atualiza a waveform conforme o áudio toca.
+  // Atualiza a barra + destaca o trecho atual conforme o áudio toca.
   let lastActive = null;
   audio.addEventListener('timeupdate', () => {
     const d = curDur();
-    updateWave(d ? audio.currentTime / d : 0);
+    setSeekUI(d ? audio.currentTime / d : 0);
     tCur.textContent = fmtTime(audio.currentTime * 1000);
 
     const t = audio.currentTime * 1000;
@@ -290,7 +309,10 @@ function renderDetail(m, ctx = {}) {
     }
     if (current !== lastActive) {
       segEls.forEach((el) => el.classList.toggle('active', el === current));
-      if (current) current.scrollIntoView({ block: 'nearest' });
+      // Só rola se estiver acompanhando E a linha saiu da área visível.
+      if (current && autoFollow && !isInView(current)) {
+        current.scrollIntoView({ block: 'center' });
+      }
       lastActive = current;
     }
   });
@@ -574,6 +596,10 @@ searchEl.addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(loadMeetings, 300);
 });
+// Rolar manualmente pausa o auto-acompanhamento da transcrição por alguns segundos.
+detailEl.addEventListener('wheel', pauseAutoFollow, { passive: true });
+detailEl.addEventListener('touchmove', pauseAutoFollow, { passive: true });
+
 fromEl.addEventListener('change', loadMeetings);
 toEl.addEventListener('change', loadMeetings);
 ownerFilterEl.addEventListener('change', loadMeetings);

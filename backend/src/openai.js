@@ -2,6 +2,7 @@
 import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
+import { splitAudio } from './audio-split.js';
 
 // Modelo de transcrição: gpt-4o-transcribe-diarize — transcreve com diarização
 // e devolve segmentos com tempo (start/end) via response_format=diarized_json.
@@ -163,9 +164,34 @@ async function transcribeWhisper(buffer, filename, mimetype) {
 }
 
 /**
+ * Áudio longo: divide em blocos de ~20min, diariza cada bloco e junta tudo
+ * corrigindo os timestamps pelo offset de cada bloco.
+ */
+async function transcribeDiarizeChunked(buffer, mimetype) {
+  const { chunks, cleanup } = await splitAudio(buffer, 1200); // 20min < teto de ~1400s
+  try {
+    const all = [];
+    // Sequencial (não paralelo): dois uploads grandes ao mesmo tempo saturam a
+    // banda do host e derrubam a conexão com a OpenAI ("Premature close").
+    for (let i = 0; i < chunks.length; i++) {
+      const { buffer: buf, startMs } = chunks[i];
+      const segs = await transcribeDiarize(buf, `chunk${i}.webm`, mimetype);
+      for (const s of segs) {
+        all.push({ ...s, startMs: s.startMs + startMs, endMs: s.endMs + startMs });
+      }
+    }
+    all.sort((a, b) => a.startMs - b.startMs);
+    return collapseRepeats(all);
+  } finally {
+    await cleanup().catch(() => {});
+  }
+}
+
+/**
  * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo (e locutor quando o
- * modelo diariza). Tenta o gpt-4o-transcribe-diarize; se o áudio passar do
- * limite de duração do modelo, cai automaticamente para o whisper-1.
+ * modelo diariza). Tenta o gpt-4o-transcribe-diarize direto; se o áudio passar
+ * do limite de duração do modelo (~23min), divide em blocos e diariza cada um.
+ * Se o corte falhar (ex.: ffmpeg indisponível), cai para o whisper-1.
  * @param {Buffer} buffer
  * @param {string} filename
  * @param {string} [mimetype]
@@ -179,11 +205,19 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
     return await transcribeDiarize(buffer, filename, mimetype);
   } catch (err) {
     const msg = String(err?.message || '');
-    // O diarize recusa áudios longos (> ~1400s). Nesse caso, usa o whisper-1.
+    // O diarize recusa áudios longos (> ~1400s) com 400.
     const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
     if (!tooLong) throw err;
-    console.warn(`Diarize recusou (áudio longo) — fallback p/ whisper-1: ${msg.slice(0, 140)}`);
-    return await transcribeWhisper(buffer, filename, mimetype);
+    try {
+      console.warn('Diarize: áudio longo — dividindo em blocos de 20min…');
+      return await transcribeDiarizeChunked(buffer, mimetype);
+    } catch (splitErr) {
+      console.warn(
+        `Corte/diarização em blocos falhou (${String(splitErr?.message || splitErr).slice(0, 140)}). ` +
+        'Fallback p/ whisper-1.'
+      );
+      return await transcribeWhisper(buffer, filename, mimetype);
+    }
   }
 }
 

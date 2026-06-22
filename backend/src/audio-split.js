@@ -66,3 +66,24 @@ export async function splitAudio(buffer, segmentSeconds = 1200) {
     throw err;
   }
 }
+
+/**
+ * "Remuxa" um webm (reescreve o container com -c copy, SEM recodificar) para
+ * gravar a duração e o índice de busca (cues). O webm do MediaRecorder vem sem
+ * esses metadados, o que deixa o player lento para carregar e dar seek.
+ * @param {Buffer} buffer
+ * @returns {Promise<Buffer>} novo webm com duração + cues
+ */
+export async function remuxWebm(buffer) {
+  if (!ffmpegPath) throw new Error('ffmpeg-static não disponível');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eva-remux-'));
+  try {
+    const input = path.join(dir, 'in.webm');
+    const output = path.join(dir, 'out.webm');
+    await fs.writeFile(input, buffer);
+    await runFfmpeg(['-i', input, '-c', 'copy', output]);
+    return await fs.readFile(output);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}

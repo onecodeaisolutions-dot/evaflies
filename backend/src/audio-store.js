@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { useSupabase, supabase, SUPABASE_BUCKET } from './storage-config.js';
+import { remuxWebm } from './audio-split.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
@@ -27,14 +28,22 @@ export async function initAudioStore() {
 /** Salva um áudio e devolve o audioId (uuid). */
 export async function saveAudio(buffer, contentType = 'audio/webm') {
   const id = crypto.randomUUID();
+  // Reescreve o container gravando duração + índice de busca (player carrega e
+  // dá seek na hora). Se o remux falhar, usa o arquivo original.
+  let data = buffer;
+  try {
+    data = await remuxWebm(buffer);
+  } catch (err) {
+    console.warn(`Remux do áudio falhou — salvando original: ${String(err?.message || err).slice(0, 140)}`);
+  }
   if (useSupabase) {
     const { error } = await supabase()
       .storage.from(SUPABASE_BUCKET)
-      .upload(`${id}.webm`, buffer, { contentType, upsert: false });
+      .upload(`${id}.webm`, data, { contentType, upsert: false });
     if (error) throw error;
   } else {
     await fs.mkdir(AUDIO_DIR, { recursive: true });
-    await fs.writeFile(path.join(AUDIO_DIR, `${id}.webm`), buffer);
+    await fs.writeFile(path.join(AUDIO_DIR, `${id}.webm`), data);
   }
   return id;
 }

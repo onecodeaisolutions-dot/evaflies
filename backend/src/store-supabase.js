@@ -16,6 +16,7 @@ function toMeeting(row) {
     audioId: row.audio_id || null,
     owner: row.owner || null,
     shareId: row.share_id || null,
+    clientId: row.client_id || null,
     createdAt: row.created_at,
   };
 }
@@ -76,7 +77,12 @@ export async function getMeeting(id, ownerId) {
   return toMeeting(data);
 }
 
-export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner }) {
+export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner, clientId }) {
+  // Idempotência: se já existe uma reunião com este clientId, devolve-a.
+  if (clientId) {
+    const existing = await getMeetingByClientId(clientId);
+    if (existing) return existing;
+  }
   const row = {
     title: title || `Reunião ${new Date().toLocaleString('pt-BR')}`,
     transcript: transcript || '',
@@ -85,10 +91,18 @@ export async function createMeeting({ title, transcript, segments, summary, dura
     duration_ms: durationMs || 0,
     audio_id: audioId || null,
   };
-  // Só inclui "owner" quando houver — assim funciona mesmo antes de criar a coluna.
+  // Só inclui "owner"/"client_id" quando houver — funciona mesmo antes de criar a coluna.
   if (owner) row.owner = owner;
+  if (clientId) row.client_id = clientId;
   const { data, error } = await supabase().from(TABLE).insert(row).select().single();
-  if (error) throw error;
+  if (error) {
+    // Corrida: outra requisição (retry simultâneo) criou primeiro -> devolve a dela.
+    if (error.code === '23505' && clientId) {
+      const dup = await getMeetingByClientId(clientId);
+      if (dup) return dup;
+    }
+    throw error;
+  }
   return toMeeting(data);
 }
 
@@ -115,6 +129,13 @@ export async function updateMeeting(id, patch) {
 export async function getMeetingByShareId(shareId) {
   if (!shareId) return null;
   const { data, error } = await supabase().from(TABLE).select('*').eq('share_id', shareId).maybeSingle();
+  if (error) throw error;
+  return toMeeting(data);
+}
+
+export async function getMeetingByClientId(clientId) {
+  if (!clientId) return null;
+  const { data, error } = await supabase().from(TABLE).select('*').eq('client_id', clientId).maybeSingle();
   if (error) throw error;
   return toMeeting(data);
 }

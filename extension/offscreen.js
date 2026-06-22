@@ -67,7 +67,9 @@ async function postFinalize(form) {
       await sleep(delays[i]); // upload roda em segundo plano (sem status global)
     }
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 300000); // transcreve 2 canais em sequência
+    // 10 min: cobre reuniões longas (corte em blocos + 2 canais). Como o envio é
+    // idempotente (clientId), um retry após timeout não duplica a reunião.
+    const timer = setTimeout(() => ctrl.abort(), 600000);
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -237,6 +239,9 @@ async function stopCapture() {
     form.append('othersName', capOthers);
     form.append('durationMs', String(durationMs));
     form.append('summarize', 'true');
+    // Chave de idempotência: gerada UMA vez por reunião e reusada em todos os
+    // retries. O servidor usa para não duplicar a reunião se a resposta se perder.
+    form.append('clientId', crypto.randomUUID());
   } catch (err) {
     cleanup();
     send({ type: 'CAPTURE_ERROR', error: err.message }); // não houve upload p/ enfileirar

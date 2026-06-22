@@ -73,8 +73,13 @@ export async function getMeeting(id, ownerId) {
 }
 
 /** Cria uma reunião. */
-export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner }) {
+export async function createMeeting({ title, transcript, segments, summary, durationMs, audioId, owner, clientId }) {
   const meetings = await readAll();
+  // Idempotência: se já existe uma reunião com este clientId, devolve-a.
+  if (clientId) {
+    const dup = meetings.find((x) => x.clientId === clientId);
+    if (dup) return dup;
+  }
   const meeting = {
     id: crypto.randomUUID(),
     title: title || `Reunião ${new Date().toLocaleString('pt-BR')}`,
@@ -85,6 +90,7 @@ export async function createMeeting({ title, transcript, segments, summary, dura
     audioId: audioId || null,
     owner: owner || null,
     shareId: null,
+    clientId: clientId || null,
     createdAt: new Date().toISOString(),
   };
   meetings.push(meeting);
@@ -97,6 +103,13 @@ export async function getMeetingByShareId(shareId) {
   if (!shareId) return null;
   const meetings = await readAll();
   return meetings.find((x) => x.shareId === shareId) || null;
+}
+
+/** Busca uma reunião pela chave de idempotência do cliente (evita duplicatas). */
+export async function getMeetingByClientId(clientId) {
+  if (!clientId) return null;
+  const meetings = await readAll();
+  return meetings.find((x) => x.clientId === clientId) || null;
 }
 
 /** Atualiza campos de uma reunião existente. */

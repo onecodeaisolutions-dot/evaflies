@@ -11,6 +11,7 @@ export const ping = (...a) => impl.ping(...a);
 export const listMeetings = (...a) => impl.listMeetings(...a);
 export const getMeeting = (...a) => impl.getMeeting(...a);
 export const getMeetingByShareId = (...a) => impl.getMeetingByShareId(...a);
+export const getMeetingByClientId = (...a) => impl.getMeetingByClientId(...a);
 export const createMeeting = (...a) => impl.createMeeting(...a);
 export const updateMeeting = (...a) => impl.updateMeeting(...a);
 export const deleteMeeting = (...a) => impl.deleteMeeting(...a);

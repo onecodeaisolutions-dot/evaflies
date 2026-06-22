@@ -29,6 +29,7 @@ import {
   listMeetings,
   getMeeting,
   getMeetingByShareId,
+  getMeetingByClientId,
   createMeeting,
   updateMeeting,
   deleteMeeting,
@@ -166,8 +167,15 @@ app.post(
   ]),
   wrap(async (req, res) => {
     const files = req.files || {};
-    const { title, selfName, othersName, durationMs } = req.body || {};
+    const { title, selfName, othersName, durationMs, clientId } = req.body || {};
     const wantSummary = req.body?.summarize !== 'false';
+
+    // 0) Idempotência: se a extensão reenviar (retry) a MESMA reunião, devolve a
+    //    que já foi criada em vez de duplicar (e nem re-transcreve).
+    if (clientId) {
+      const dup = await getMeetingByClientId(clientId);
+      if (dup) return res.status(200).json(dup);
+    }
 
     // 1) Salva o áudio mixado (para reprodução no painel).
     let audioId = null;
@@ -233,6 +241,7 @@ app.post(
       durationMs: Number(durationMs) || 0,
       audioId,
       owner,
+      clientId: clientId || null,
     });
     res.status(201).json(meeting);
   })

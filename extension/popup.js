@@ -6,6 +6,8 @@ const $ = (id) => document.getElementById(id);
 
 const els = {
   recordBtn: $('recordBtn'),
+  recLabel: $('recLabel'),
+  statusPill: $('statusPill'),
   status: $('status'),
   meta: $('meta'),
   transcript: $('transcript'),
@@ -32,6 +34,8 @@ const els = {
 let settings = null;
 let sessionActive = false; // gravando ou processando
 
+const fmtClock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
 // --------------------------------------------------------------------------
 // Render
 // --------------------------------------------------------------------------
@@ -42,11 +46,12 @@ function renderSession(session) {
   sessionActive = !!(recording || stopping || pending);
 
   if (recording) {
-    els.recordBtn.textContent = '⏹ Parar';
+    const secs = session?.startedAt ? Math.round((Date.now() - session.startedAt) / 1000) : 0;
+    els.recLabel.textContent = `Parar · ${fmtClock(secs)}`;
   } else if (stopping) {
-    els.recordBtn.textContent = '⏳ Finalizando…';
+    els.recLabel.textContent = 'Finalizando…';
   } else {
-    els.recordBtn.textContent = '▶ Gravar';
+    els.recLabel.textContent = 'Gravar';
   }
   els.recordBtn.classList.toggle('recording', !!recording);
   // Só bloqueia no curto "finalizando". Reuniões processando em 2º plano NÃO
@@ -56,19 +61,15 @@ function renderSession(session) {
   let statusText = session?.status || 'Pronto.';
   if (pending > 0) statusText += ` · ⏳ ${pending} em segundo plano`;
   els.status.textContent = statusText;
+  els.statusPill.classList.toggle('recording', !!recording);
+  els.statusPill.classList.toggle('error', /^erro/i.test(statusText));
 
-  if (session?.startedAt) {
-    if (recording) {
-      const secs = Math.round((Date.now() - session.startedAt) / 1000);
-      els.meta.textContent = `Gravando · ${secs}s`;
-    } else if (stopping) {
-      // Cronômetro CONGELADO no momento em que a captura parou.
-      const secs = Math.round(((session.endedAt || Date.now()) - session.startedAt) / 1000);
-      els.meta.textContent = `Gravou ${secs}s · finalizando…`;
-    } else {
-      const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
-      els.meta.textContent = segCount ? `${segCount} trecho(s) transcrito(s)` : '';
-    }
+  if (session?.startedAt && stopping) {
+    // Cronômetro CONGELADO no momento em que a captura parou.
+    const secs = Math.round(((session.endedAt || Date.now()) - session.startedAt) / 1000);
+    els.meta.textContent = `Gravou ${fmtClock(secs)} · finalizando…`;
+  } else if (!recording && session?.segments?.length) {
+    els.meta.textContent = `${session.segments.length} trecho(s) transcrito(s)`;
   } else {
     els.meta.textContent = '';
   }
@@ -128,7 +129,8 @@ els.recordBtn.addEventListener('click', async () => {
 });
 
 els.settingsToggle.addEventListener('click', () => {
-  els.settings.classList.toggle('hidden');
+  const open = !els.settings.classList.toggle('hidden');
+  els.settingsToggle.classList.toggle('active', open);
 });
 
 els.saveSettings.addEventListener('click', async () => {
@@ -138,40 +140,40 @@ els.saveSettings.addEventListener('click', async () => {
   const autoStopSilenceMin = Math.max(0, Math.min(60, parseInt(els.autoStop.value, 10) || 0));
   settings = await saveSettings({ backendUrl: url, userName, accessKey, autoStopSilenceMin });
   els.settingsStatus.textContent = 'Configurações salvas.';
-  els.settingsStatus.className = 'muted ok';
+  els.settingsStatus.className = 'settings-status ok';
 });
 
 els.checkHealth.addEventListener('click', async () => {
   els.settingsStatus.textContent = 'Testando…';
-  els.settingsStatus.className = 'muted';
+  els.settingsStatus.className = 'settings-status';
   try {
     const res = await fetch(`${els.backendUrl.value.trim().replace(/\/$/, '')}/api/health`);
     const data = await res.json();
     if (data.ok && data.hasApiKey) {
       els.settingsStatus.textContent = `OK · transcrição: ${data.models.TRANSCRIBE_MODEL}`;
-      els.settingsStatus.className = 'muted ok';
+      els.settingsStatus.className = 'settings-status ok';
     } else if (data.ok) {
       els.settingsStatus.textContent = 'Backend no ar, mas sem OPENAI_API_KEY configurada.';
-      els.settingsStatus.className = 'muted err';
+      els.settingsStatus.className = 'settings-status err';
     }
   } catch (err) {
     els.settingsStatus.textContent = `Sem conexão: ${err.message}`;
-    els.settingsStatus.className = 'muted err';
+    els.settingsStatus.className = 'settings-status err';
   }
 });
 
 // Concede permissão de microfone à extensão (persiste para o offscreen usar).
 els.grantMic.addEventListener('click', async () => {
   els.settingsStatus.textContent = 'Solicitando microfone…';
-  els.settingsStatus.className = 'muted';
+  els.settingsStatus.className = 'settings-status';
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach((t) => t.stop());
     els.settingsStatus.textContent = 'Microfone permitido ✅';
-    els.settingsStatus.className = 'muted ok';
+    els.settingsStatus.className = 'settings-status ok';
   } catch (err) {
     els.settingsStatus.textContent = `Permissão negada: ${err.message}`;
-    els.settingsStatus.className = 'muted err';
+    els.settingsStatus.className = 'settings-status err';
   }
 });
 

@@ -3,71 +3,96 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="popup.css" />
     <title>EvaFlies</title>
   </head>
   <body>
-    <header>
-      <h1>🎙️ EvaFlies</h1>
-      <button id="settingsToggle" class="icon-btn" title="Configurações">⚙️</button>
-    </header>
+    <div class="popup">
+      <header class="pop-header">
+        <div class="brand">
+          <div class="brand-tile"><img src="EvaFlies-logo.png" alt="EvaFlies" /></div>
+          <span class="brand-word">Eva<span>Flies</span></span>
+        </div>
+        <button id="settingsToggle" class="gear" title="Configurações">⚙</button>
+      </header>
 
-    <section id="settings" class="panel hidden">
-      <label for="backendUrl">URL do backend</label>
-      <div class="row">
-        <input id="backendUrl" type="text" placeholder="http://localhost:3000" />
-      </div>
-      <label for="userName">Seu nome (canal do microfone)</label>
-      <div class="row">
-        <input id="userName" type="text" placeholder="Você" />
-      </div>
-      <label for="accessKey">Código de acesso</label>
-      <div class="row">
-        <input id="accessKey" type="password" placeholder="código do vendedor" />
-      </div>
-      <label for="autoStop">Parar sozinho após silêncio (min · 0 = desligado)</label>
-      <div class="row">
-        <input id="autoStop" type="number" min="0" max="60" step="1" placeholder="5" />
-        <button id="saveSettings" class="btn-sm">Salvar</button>
-      </div>
-      <div class="row">
-        <button id="checkHealth" class="btn-sm">Testar conexão</button>
-        <button id="grantMic" class="btn-sm">Permitir microfone</button>
-      </div>
-      <p id="settingsStatus" class="muted"></p>
-    </section>
+      <div class="pop-body eva-scroll">
+        <section id="settings" class="settings-panel hidden">
+          <div class="section-label">
+            <span>CONFIGURAÇÕES</span>
+            <div class="section-line"></div>
+          </div>
+          <div class="field">
+            <label for="backendUrl">URL do backend</label>
+            <input id="backendUrl" type="text" placeholder="http://localhost:3000" />
+          </div>
+          <div class="field">
+            <label for="userName">Seu nome (canal do microfone)</label>
+            <input id="userName" type="text" placeholder="Você" />
+          </div>
+          <div class="field">
+            <label for="accessKey">Código de acesso</label>
+            <input id="accessKey" type="password" placeholder="código do vendedor" />
+          </div>
+          <div class="field">
+            <label for="autoStop">
+              Parar sozinho após silêncio <span class="hint">(min · 0 = desligado)</span>
+            </label>
+            <div class="row">
+              <input id="autoStop" class="num" type="number" min="0" max="60" step="1" placeholder="5" />
+              <button id="saveSettings" class="btn-primary">Salvar</button>
+            </div>
+          </div>
+          <div class="row gap">
+            <button id="checkHealth" class="btn-ghost">Testar conexão</button>
+            <button id="grantMic" class="btn-ghost">Permitir microfone</button>
+          </div>
+          <p id="settingsStatus" class="settings-status"></p>
+        </section>
 
-    <section class="record-area">
-      <button id="recordBtn" class="record-btn">▶ Gravar</button>
-      <p id="status" class="status">Pronto.</p>
-      <p id="meta" class="muted"></p>
-    </section>
+        <button id="recordBtn" class="record-btn">
+          <span class="rec-waves" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span class="rec-icon" aria-hidden="true">▶</span>
+          <span id="recLabel" class="rec-label">Gravar</span>
+        </button>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Transcrição</h2>
-        <button id="copyTranscript" class="btn-sm" title="Copiar">Copiar</button>
-      </div>
-      <div id="transcript" class="transcript">
-        <span class="muted">A transcrição é gerada ao parar a gravação.</span>
-      </div>
-    </section>
+        <div id="statusPill" class="status-pill">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status" class="status-text">Pronto.</span>
+        </div>
+        <p id="meta" class="meta-line"></p>
 
-    <section id="summarySection" class="panel hidden">
-      <div class="panel-head"><h2>Resumo</h2></div>
-      <div id="summary" class="summary"></div>
-      <h3>Action items</h3>
-      <ul id="actionItems"></ul>
-      <div id="topics" class="topics"></div>
-    </section>
+        <section class="card">
+          <div class="card-head">
+            <span class="card-label">TRANSCRIÇÃO</span>
+            <button id="copyTranscript" class="btn-copy" title="Copiar">Copiar</button>
+          </div>
+          <div id="transcript" class="transcript-text">
+            <span class="muted">A transcrição é gerada ao parar a gravação.</span>
+          </div>
+        </section>
 
-    <footer>
-      <div class="row">
-        <button id="openDashboard" class="link-btn">🗂️ Abrir painel</button>
-        <button id="viewMeetings" class="link-btn">Reuniões salvas</button>
+        <section id="summarySection" class="card hidden">
+          <div class="card-head"><span class="card-label">RESUMO</span></div>
+          <div id="summary" class="summary-text"></div>
+          <div class="sub-label">Itens de ação</div>
+          <ul id="actionItems" class="action-items"></ul>
+          <div id="topics" class="topics"></div>
+        </section>
+
+        <div class="pop-footer">
+          <button id="openDashboard" class="link"><span>🗂</span> Abrir painel</button>
+          <button id="viewMeetings" class="link">Reuniões salvas</button>
+        </div>
+        <div id="meetingsList" class="meetings-list hidden"></div>
       </div>
-      <div id="meetingsList" class="meetings hidden"></div>
-    </footer>
+    </div>
 
     <script type="module" src="popup.js"></script>
   </body>

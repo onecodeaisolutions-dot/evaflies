@@ -3,17 +3,12 @@ import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
 
-// Modelo de transcrição: fixo em whisper-1 porque é o único que devolve
-// timestamps por segmento (verbose_json) — necessários para intercalar os
-// canais (vendedor/cliente) em ordem cronológica.
-const TRANSCRIBE_MODEL = 'whisper-1';
+// Modelo de transcrição: gpt-4o-transcribe-diarize — transcreve com diarização
+// e devolve segmentos com tempo (start/end) via response_format=diarized_json.
+// (Esse modelo NÃO aceita prompt, temperature, logprobs nem timestamp_granularities.)
+const TRANSCRIBE_MODEL = 'gpt-4o-transcribe-diarize';
 const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-4o-mini';
 const TRANSCRIBE_LANGUAGE = process.env.TRANSCRIBE_LANGUAGE || 'pt';
-// Prompt de contexto: ajuda o modelo a manter o idioma (pt-BR) e o vocabulário
-// do domínio, reduzindo "deriva" para inglês e melhorando termos de vendas.
-const TRANSCRIBE_PROMPT =
-  process.env.TRANSCRIBE_PROMPT ||
-  'Transcrição em português do Brasil de uma reunião de vendas entre um vendedor e um cliente.';
 
 let client = null;
 
@@ -57,12 +52,44 @@ async function withRetry(fn, label = 'openai') {
 }
 
 /**
- * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo (para intercalar
- * canais). Usa whisper-1 (verbose_json) que retorna timestamps por segmento.
+ * Converte a resposta `diarized_json` em segmentos {startMs,endMs,text,speaker}.
+ * O diarized_json vem como { text, segments: [{speaker, text, start, end}] }
+ * (start/end em segundos; speaker = "A"/"B"/… a menos que se passem referências).
+ * Função pura — separada para poder ser testada sem chamar a API.
+ * @param {{segments?: Array<{speaker?:string,text?:string,start?:number,end?:number}>}} result
+ * @returns {Array<{startMs:number,endMs:number,text:string,speaker:string|null}>}
+ */
+export function diarizedToSegments(result) {
+  const segs = Array.isArray(result?.segments) ? result.segments : [];
+  const cleaned = segs
+    .filter((s) => (s.text || '').trim())
+    .map((s) => ({
+      startMs: Math.round((s.start || 0) * 1000),
+      endMs: Math.round((s.end || 0) * 1000),
+      text: (s.text || '').trim(),
+      speaker: s.speaker || null,
+    }));
+
+  // Colapsa repetições consecutivas idênticas do mesmo locutor.
+  const out = [];
+  for (const s of cleaned) {
+    const prev = out[out.length - 1];
+    if (prev && prev.speaker === s.speaker && prev.text.toLowerCase() === s.text.toLowerCase()) {
+      prev.endMs = s.endMs; // só estende o tempo do anterior
+      continue;
+    }
+    out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo e locutor. Usa
+ * gpt-4o-transcribe-diarize (response_format=diarized_json).
  * @param {Buffer} buffer
  * @param {string} filename
  * @param {string} [mimetype]
- * @returns {Promise<Array<{startMs:number,endMs:number,text:string}>>}
+ * @returns {Promise<Array<{startMs:number,endMs:number,text:string,speaker:string|null}>>}
  */
 export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
   if (!process.env.OPENAI_API_KEY) {
@@ -76,9 +103,8 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
     form.append('file', buffer, { filename, contentType: mimetype });
     form.append('model', TRANSCRIBE_MODEL);
     form.append('language', TRANSCRIBE_LANGUAGE);
-    form.append('prompt', TRANSCRIBE_PROMPT);
-    form.append('response_format', 'verbose_json'); // já traz os segmentos com tempo
-    form.append('temperature', '0');
+    form.append('response_format', 'diarized_json'); // segmentos com tempo + locutor
+    form.append('chunking_strategy', 'auto'); // obrigatório para áudios > 30s
 
     const res = await nodeFetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -97,32 +123,7 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
     return res.json();
   }, 'transcribeVerbose');
 
-  const segs = Array.isArray(result.segments) ? result.segments : [];
-  const cleaned = segs
-    // descarta trechos sem fala ou de baixa confiança (reduz alucinação em silêncio).
-    .filter(
-      (s) =>
-        (s.text || '').trim() &&
-        (s.no_speech_prob == null || s.no_speech_prob < 0.6) &&
-        (s.avg_logprob == null || s.avg_logprob > -1.0)
-    )
-    .map((s) => ({
-      startMs: Math.round((s.start || 0) * 1000),
-      endMs: Math.round((s.end || 0) * 1000),
-      text: (s.text || '').trim(),
-    }));
-
-  // Colapsa repetições consecutivas idênticas (ex.: "E aí / E aí / E aí").
-  const out = [];
-  for (const s of cleaned) {
-    const prev = out[out.length - 1];
-    if (prev && prev.text.toLowerCase() === s.text.toLowerCase()) {
-      prev.endMs = s.endMs; // só estende o tempo do anterior
-      continue;
-    }
-    out.push(s);
-  }
-  return out;
+  return diarizedToSegments(result);
 }
 
 /**

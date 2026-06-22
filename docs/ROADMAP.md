@@ -12,7 +12,7 @@ minuto com seek). Armazenado em arquivo JSON + arquivos de áudio no backend.
 - [x] Diarização por canal: separa "Você" (microfone) de "Participantes" (aba).
 - [ ] Diarização por pessoa entre os participantes remotos (ex: pyannote / serviço dedicado).
 - [ ] **Realtime API** da OpenAI (WebSocket) para transcrição palavra-a-palavra ao vivo.
-- [ ] Timestamps por palavra (usar `whisper-1` com `response_format=verbose_json`).
+- [ ] Timestamps por palavra (highlight em nível de palavra durante a reprodução).
 
 ### Áudio
 - [x] Salvar o áudio completo da reunião (gravador contínuo) e reproduzir no painel.

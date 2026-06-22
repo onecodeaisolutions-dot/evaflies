@@ -205,10 +205,10 @@ app.post(
     }
 
     let segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
-    // Reenvio de áudio salvo: só veio o arquivo mixado -> transcreve sem separar.
+    // Reenvio de áudio salvo: só veio o arquivo mixado (sem canais separados).
+    // Aqui aproveitamos a diarização do modelo para rotular os locutores (A/B/…).
     if (!segments.length && mixed && mixed.size > 1200) {
-      const segs = await transcribeVerbose(mixed.buffer, 'mixed.webm');
-      segments = segs.map((s) => ({ ...s, speaker: null }));
+      segments = await transcribeVerbose(mixed.buffer, 'mixed.webm');
     }
     const transcript = segments
       .map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text))

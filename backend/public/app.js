@@ -629,7 +629,11 @@ resendFile.addEventListener('change', async () => {
     fd.append('summarize', 'true');
     const res = await api('/api/meetings/finalize', { method: 'POST', body: fd });
     if (res.status === 401) return showLogin();
-    if (!res.ok) throw new Error(`Servidor respondeu ${res.status}`);
+    if (!res.ok) {
+      let detail = `Servidor respondeu ${res.status}`;
+      try { const e = await res.json(); if (e && e.error) detail = e.error; } catch (_) {}
+      throw new Error(detail);
+    }
     const m = await res.json();
     await loadMeetings();
     openMeeting(m.id);

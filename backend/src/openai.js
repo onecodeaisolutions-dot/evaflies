@@ -59,20 +59,11 @@ async function withRetry(fn, label = 'openai') {
  * @param {{segments?: Array<{speaker?:string,text?:string,start?:number,end?:number}>}} result
  * @returns {Array<{startMs:number,endMs:number,text:string,speaker:string|null}>}
  */
-export function diarizedToSegments(result) {
-  const segs = Array.isArray(result?.segments) ? result.segments : [];
-  const cleaned = segs
-    .filter((s) => (s.text || '').trim())
-    .map((s) => ({
-      startMs: Math.round((s.start || 0) * 1000),
-      endMs: Math.round((s.end || 0) * 1000),
-      text: (s.text || '').trim(),
-      speaker: s.speaker || null,
-    }));
-
-  // Colapsa repetições consecutivas idênticas do mesmo locutor.
+// Colapsa repetições consecutivas idênticas do mesmo locutor (ex.: alucinação
+// "E aí / E aí / E aí" em silêncio).
+function collapseRepeats(segs) {
   const out = [];
-  for (const s of cleaned) {
+  for (const s of segs) {
     const prev = out[out.length - 1];
     if (prev && prev.speaker === s.speaker && prev.text.toLowerCase() === s.text.toLowerCase()) {
       prev.endMs = s.endMs; // só estende o tempo do anterior
@@ -83,29 +74,46 @@ export function diarizedToSegments(result) {
   return out;
 }
 
-/**
- * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo e locutor. Usa
- * gpt-4o-transcribe-diarize (response_format=diarized_json).
- * @param {Buffer} buffer
- * @param {string} filename
- * @param {string} [mimetype]
- * @returns {Promise<Array<{startMs:number,endMs:number,text:string,speaker:string|null}>>}
- */
-export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
-  }
-  // IMPORTANTE: chamamos a OpenAI direto via node-fetch + form-data (Node https),
-  // NÃO pelo fetch nativo do Node (undici), que no Render free derrubava o upload
-  // com "Premature close". O form-data manda o áudio com Content-Length correto.
-  const result = await withRetry(async () => {
-    const form = new FormData();
-    form.append('file', buffer, { filename, contentType: mimetype });
-    form.append('model', TRANSCRIBE_MODEL);
-    form.append('language', TRANSCRIBE_LANGUAGE);
-    form.append('response_format', 'diarized_json'); // segmentos com tempo + locutor
-    form.append('chunking_strategy', 'auto'); // obrigatório para áudios > 30s
+export function diarizedToSegments(result) {
+  const segs = Array.isArray(result?.segments) ? result.segments : [];
+  const cleaned = segs
+    .filter((s) => (s.text || '').trim())
+    .map((s) => ({
+      startMs: Math.round((s.start || 0) * 1000),
+      endMs: Math.round((s.end || 0) * 1000),
+      text: (s.text || '').trim(),
+      speaker: s.speaker || null,
+    }));
+  return collapseRepeats(cleaned);
+}
 
+// Converte a resposta verbose_json (whisper-1) em segmentos, descartando trechos
+// sem fala / de baixa confiança (reduz alucinação em silêncio).
+function verboseToSegments(result) {
+  const segs = Array.isArray(result?.segments) ? result.segments : [];
+  const cleaned = segs
+    .filter(
+      (s) =>
+        (s.text || '').trim() &&
+        (s.no_speech_prob == null || s.no_speech_prob < 0.6) &&
+        (s.avg_logprob == null || s.avg_logprob > -1.0)
+    )
+    .map((s) => ({
+      startMs: Math.round((s.start || 0) * 1000),
+      endMs: Math.round((s.end || 0) * 1000),
+      text: (s.text || '').trim(),
+      speaker: null,
+    }));
+  return collapseRepeats(cleaned);
+}
+
+// POST multipart para /audio/transcriptions, com retry de rede. `buildForm` cria
+// uma FormData NOVA a cada tentativa (streams de form não podem ser reusados).
+// IMPORTANTE: usamos node-fetch + form-data (Node https), NÃO o fetch nativo do
+// Node (undici), que no Render free derrubava o upload com "Premature close".
+async function postTranscription(buildForm, label) {
+  return withRetry(async () => {
+    const form = buildForm();
     const res = await nodeFetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -116,14 +124,67 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      const err = new Error(`OpenAI ${res.status}: ${detail.slice(0, 200)}`);
+      const err = new Error(`OpenAI ${res.status}: ${detail.slice(0, 300)}`);
       err.status = res.status;
       throw err;
     }
     return res.json();
-  }, 'transcribeVerbose');
+  }, label);
+}
 
+// Transcrição com diarização (gpt-4o-transcribe-diarize). Limite do modelo:
+// ~1400s (≈23min) de áudio, mesmo com chunking_strategy=auto.
+async function transcribeDiarize(buffer, filename, mimetype) {
+  const result = await postTranscription(() => {
+    const form = new FormData();
+    form.append('file', buffer, { filename, contentType: mimetype });
+    form.append('model', TRANSCRIBE_MODEL);
+    form.append('language', TRANSCRIBE_LANGUAGE);
+    form.append('response_format', 'diarized_json'); // segmentos com tempo + locutor
+    form.append('chunking_strategy', 'auto'); // obrigatório para áudios > 30s
+    return form;
+  }, 'diarize');
   return diarizedToSegments(result);
+}
+
+// Fallback: whisper-1 com verbose_json (sem limite prático de duração, mas
+// qualidade menor). Não diariza — devolve speaker null.
+async function transcribeWhisper(buffer, filename, mimetype) {
+  const result = await postTranscription(() => {
+    const form = new FormData();
+    form.append('file', buffer, { filename, contentType: mimetype });
+    form.append('model', 'whisper-1');
+    form.append('language', TRANSCRIBE_LANGUAGE);
+    form.append('response_format', 'verbose_json');
+    form.append('temperature', '0');
+    return form;
+  }, 'whisper');
+  return verboseToSegments(result);
+}
+
+/**
+ * Transcreve um ÁUDIO INTEIRO devolvendo trechos com tempo (e locutor quando o
+ * modelo diariza). Tenta o gpt-4o-transcribe-diarize; se o áudio passar do
+ * limite de duração do modelo, cai automaticamente para o whisper-1.
+ * @param {Buffer} buffer
+ * @param {string} filename
+ * @param {string} [mimetype]
+ * @returns {Promise<Array<{startMs:number,endMs:number,text:string,speaker:string|null}>>}
+ */
+export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
+  }
+  try {
+    return await transcribeDiarize(buffer, filename, mimetype);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    // O diarize recusa áudios longos (> ~1400s). Nesse caso, usa o whisper-1.
+    const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
+    if (!tooLong) throw err;
+    console.warn(`Diarize recusou (áudio longo) — fallback p/ whisper-1: ${msg.slice(0, 140)}`);
+    return await transcribeWhisper(buffer, filename, mimetype);
+  }
 }
 
 /**

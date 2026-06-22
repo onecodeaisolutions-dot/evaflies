@@ -94,14 +94,19 @@ export async function createMeeting({ title, transcript, segments, summary, dura
   // Só inclui "owner"/"client_id" quando houver — funciona mesmo antes de criar a coluna.
   if (owner) row.owner = owner;
   if (clientId) row.client_id = clientId;
-  const { data, error } = await supabase().from(TABLE).insert(row).select().single();
+  let { data, error } = await supabase().from(TABLE).insert(row).select().single();
   if (error) {
     // Corrida: outra requisição (retry simultâneo) criou primeiro -> devolve a dela.
     if (error.code === '23505' && clientId) {
       const dup = await getMeetingByClientId(clientId);
       if (dup) return dup;
     }
-    throw error;
+    // Coluna client_id ainda não existe (migração não rodada): cria sem ela.
+    if (error.code === '42703' && row.client_id) {
+      delete row.client_id;
+      ({ data, error } = await supabase().from(TABLE).insert(row).select().single());
+    }
+    if (error) throw error;
   }
   return toMeeting(data);
 }
@@ -136,7 +141,7 @@ export async function getMeetingByShareId(shareId) {
 export async function getMeetingByClientId(clientId) {
   if (!clientId) return null;
   const { data, error } = await supabase().from(TABLE).select('*').eq('client_id', clientId).maybeSingle();
-  if (error) throw error;
+  if (error) return null; // coluna pode não existir ainda — degrada sem quebrar o finalize
   return toMeeting(data);
 }
 

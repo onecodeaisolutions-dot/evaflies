@@ -62,6 +62,18 @@ const uploadFinalize = multer({
 // Wrapper para capturar erros de handlers async.
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// "Impressão digital" do áudio: hash sha256 dos bytes enviados. Serve como chave
+// de idempotência quando a extensão não manda um clientId (versões antigas) —
+// como o retry reenvia os mesmos bytes, o hash é idêntico e não duplica.
+function audioFingerprint(...uploads) {
+  const hash = crypto.createHash('sha256');
+  let any = false;
+  for (const f of uploads) {
+    if (f && f.buffer && f.size > 1200) { hash.update(f.buffer); any = true; }
+  }
+  return any ? `sha256:${hash.digest('hex')}` : null;
+}
+
 // --- Health ---------------------------------------------------------------
 app.get('/api/health', (req, res) => {
   res.json({
@@ -170,16 +182,22 @@ app.post(
     const { title, selfName, othersName, durationMs, clientId } = req.body || {};
     const wantSummary = req.body?.summarize !== 'false';
 
-    // 0) Idempotência: se a extensão reenviar (retry) a MESMA reunião, devolve a
-    //    que já foi criada em vez de duplicar (e nem re-transcreve).
-    if (clientId) {
-      const dup = await getMeetingByClientId(clientId);
+    const mixed = files.mixed?.[0];
+    const sf = files.self?.[0];
+    const ot = files.others?.[0];
+
+    // 0) Idempotência: evita duplicar a reunião quando a extensão reenvia (retry).
+    //    Extensões novas mandam um clientId; para as antigas (sem clientId),
+    //    derivamos a chave do HASH do áudio — como o retry envia os MESMOS bytes,
+    //    o hash é igual e a reunião não duplica (funciona em qualquer versão).
+    const idemKey = clientId || audioFingerprint(mixed, sf, ot);
+    if (idemKey) {
+      const dup = await getMeetingByClientId(idemKey);
       if (dup) return res.status(200).json(dup);
     }
 
     // 1) Salva o áudio mixado (para reprodução no painel).
     let audioId = null;
-    const mixed = files.mixed?.[0];
     if (mixed && mixed.size > 1200) {
       audioId = await saveAudio(mixed.buffer, mixed.mimetype || 'audio/webm');
     }
@@ -187,8 +205,6 @@ app.post(
     // 2) Transcreve os dois canais EM SEQUÊNCIA (não em paralelo): dois uploads
     //    grandes simultâneos saturam a banda do host e derrubam a conexão com a
     //    OpenAI ("Premature close").
-    const sf = files.self?.[0];
-    const ot = files.others?.[0];
     let selfSegs = [];
     let otherSegs = [];
     try {
@@ -241,7 +257,7 @@ app.post(
       durationMs: Number(durationMs) || 0,
       audioId,
       owner,
-      clientId: clientId || null,
+      clientId: idemKey,
     });
     res.status(201).json(meeting);
   })

@@ -37,29 +37,34 @@ let sessionActive = false; // gravando ou processando
 // --------------------------------------------------------------------------
 function renderSession(session) {
   const recording = session?.recording;
-  const processing = session?.processing;
-  sessionActive = !!(recording || processing);
+  const stopping = session?.stopping; // curto "finalizando" (coletando o áudio)
+  const pending = session?.pendingUploads || 0; // uploads em segundo plano
+  sessionActive = !!(recording || stopping || pending);
 
   if (recording) {
     els.recordBtn.textContent = '⏹ Parar';
-  } else if (processing) {
-    els.recordBtn.textContent = '⏳ Processando…';
+  } else if (stopping) {
+    els.recordBtn.textContent = '⏳ Finalizando…';
   } else {
     els.recordBtn.textContent = '▶ Gravar';
   }
   els.recordBtn.classList.toggle('recording', !!recording);
-  els.recordBtn.disabled = !!processing; // não dá pra gravar enquanto finaliza
+  // Só bloqueia no curto "finalizando". Reuniões processando em 2º plano NÃO
+  // impedem iniciar uma nova gravação.
+  els.recordBtn.disabled = !!stopping;
 
-  els.status.textContent = session?.status || 'Pronto.';
+  let statusText = session?.status || 'Pronto.';
+  if (pending > 0) statusText += ` · ⏳ ${pending} em segundo plano`;
+  els.status.textContent = statusText;
 
   if (session?.startedAt) {
     if (recording) {
       const secs = Math.round((Date.now() - session.startedAt) / 1000);
       els.meta.textContent = `Gravando · ${secs}s`;
-    } else if (processing) {
+    } else if (stopping) {
       // Cronômetro CONGELADO no momento em que a captura parou.
       const secs = Math.round(((session.endedAt || Date.now()) - session.startedAt) / 1000);
-      els.meta.textContent = `Gravou ${secs}s · processando…`;
+      els.meta.textContent = `Gravou ${secs}s · finalizando…`;
     } else {
       const segCount = Array.isArray(session.segments) ? session.segments.length : 0;
       els.meta.textContent = segCount ? `${segCount} trecho(s) transcrito(s)` : '';
@@ -110,7 +115,7 @@ async function refresh() {
 // --------------------------------------------------------------------------
 els.recordBtn.addEventListener('click', async () => {
   const { session } = await chrome.runtime.sendMessage({ target: 'background', type: 'GET_SESSION' });
-  if (session?.processing) return; // ignora cliques durante o processamento
+  if (session?.stopping) return; // ignora cliques durante o curto "finalizando"
   const type = session?.recording ? 'STOP' : 'START';
   els.recordBtn.disabled = true;
   try {

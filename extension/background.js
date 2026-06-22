@@ -56,11 +56,9 @@ async function ensureOffscreen() {
   });
 }
 
-async function closeOffscreen() {
-  if (await hasOffscreen()) {
-    await chrome.offscreen.closeDocument();
-  }
-}
+// O offscreen é mantido aberto entre reuniões: ele segura os uploads em segundo
+// plano (que sobreviveriam à morte do service worker) e deixa a próxima gravação
+// começar na hora. Fechá-lo mataria um upload em andamento.
 
 // --------------------------------------------------------------------------
 // Início / fim da gravação
@@ -85,9 +83,12 @@ function setRecBadge(state) {
 
 async function startRecording() {
   const existing = await getSession();
-  if (existing && (existing.recording || existing.processing)) {
-    throw new Error('Já há uma gravação em andamento ou processando.');
+  // Só bloqueia se já estiver gravando ou no curto "finalizando" (coletando o
+  // áudio). Uploads/transcrições em segundo plano NÃO impedem uma nova gravação.
+  if (existing && (existing.recording || existing.stopping)) {
+    throw new Error('Aguarde a gravação atual finalizar para iniciar outra.');
   }
+  const pendingUploads = existing?.pendingUploads || 0;
   const settings = await getSettings();
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -98,7 +99,9 @@ async function startRecording() {
 
   await setSession({
     recording: true,
+    stopping: false,
     processing: false,
+    pendingUploads, // preserva uploads em segundo plano de reuniões anteriores
     startedAt: Date.now(),
     endedAt: null,
     tabId: tab.id,
@@ -128,34 +131,19 @@ async function startRecording() {
   broadcast({ type: 'SESSION_UPDATE' });
 }
 
-async function stopRecording() {
-  setRecBadge('proc');
-  // A captura para AGORA: congela o cronômetro e entra em "processando".
-  await patchSession({ recording: false, processing: true, endedAt: Date.now(), status: 'Finalizando…' });
-  chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP_CAPTURE' }).catch(() => {});
-  broadcast({ type: 'SESSION_UPDATE' });
+// Badge do ícone conforme o estado: gravando > processando em 2º plano > limpo.
+function badgeFor(session) {
+  if (session?.recording) return 'rec';
+  if ((session?.pendingUploads || 0) > 0) return 'proc';
+  return null;
 }
 
-// Chamado quando o offscreen termina (ele já transcreveu e criou a reunião).
-async function finalize(meeting, errorMsg) {
-  await closeOffscreen();
-  setRecBadge(null);
-  if (meeting) {
-    await patchSession({
-      recording: false,
-      processing: false,
-      status: 'Concluído ✅',
-      meeting,
-      transcript: meeting.transcript || '',
-      segments: meeting.segments || [],
-    });
-  } else {
-    await patchSession({
-      recording: false,
-      processing: false,
-      status: errorMsg ? `Erro: ${errorMsg}` : 'Sem transcrição.',
-    });
-  }
+async function stopRecording() {
+  setRecBadge('proc');
+  // Curto "finalizando": para os gravadores e coleta o áudio. Bem rápido — só
+  // até o offscreen mandar CAPTURE_STOPPED (aí já dá pra gravar a próxima).
+  await patchSession({ recording: false, stopping: true, processing: true, endedAt: Date.now(), status: 'Finalizando…' });
+  chrome.runtime.sendMessage({ target: 'offscreen', type: 'STOP_CAPTURE' }).catch(() => {});
   broadcast({ type: 'SESSION_UPDATE' });
 }
 
@@ -209,36 +197,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
 
-      // Offscreen parou sozinho (silêncio): entra em "processando" e congela o tempo.
+      // Offscreen parou sozinho (silêncio): entra no curto "finalizando".
       case 'CAPTURE_STOPPING':
         setRecBadge('proc');
-        await patchSession({ recording: false, processing: true, endedAt: Date.now() });
+        await patchSession({ recording: false, stopping: true, processing: true, endedAt: Date.now() });
         broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });
         break;
 
-      case 'CAPTURE_ERROR':
-        setRecBadge(null);
-        await patchSession({ recording: false, processing: false, status: `Erro: ${message.error}` });
-        await closeOffscreen();
+      case 'CAPTURE_ERROR': {
+        const next = await patchSession({ recording: false, stopping: false, processing: false, status: `Erro: ${message.error}` });
+        setRecBadge(badgeFor(next));
         broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });
         break;
+      }
 
-      case 'CAPTURE_STOPPED':
-        await finalize(message.meeting || null, message.error || null);
+      // Áudio coletado: dispositivo LIVRE. O upload/transcrição segue em 2º plano.
+      case 'CAPTURE_STOPPED': {
+        const s = (await getSession()) || {};
+        const pending = (s.pendingUploads || 0) + 1;
+        const next = await patchSession({
+          recording: false,
+          stopping: false,
+          processing: false,
+          pendingUploads: pending,
+          status: 'Processando reunião em segundo plano…',
+        });
+        setRecBadge(badgeFor(next));
+        broadcast({ type: 'SESSION_UPDATE' });
         sendResponse({ ok: true });
         break;
+      }
+
+      // Upload em 2º plano terminou. Só mostra o resultado se não estiver gravando
+      // outra agora (para não sobrescrever a sessão ativa).
+      case 'FINALIZE_DONE': {
+        const s = (await getSession()) || {};
+        const pending = Math.max(0, (s.pendingUploads || 0) - 1);
+        const patch = { pendingUploads: pending };
+        if (!s.recording && !s.stopping) {
+          if (message.meeting) {
+            patch.meeting = message.meeting;
+            patch.transcript = message.meeting.transcript || '';
+            patch.segments = message.meeting.segments || [];
+            patch.status = pending > 0 ? 'Processando reunião em segundo plano…' : 'Concluído ✅';
+          } else {
+            patch.status = message.error ? `Erro: ${message.error}` : 'Sem transcrição.';
+          }
+        }
+        const next = await patchSession(patch);
+        setRecBadge(badgeFor(next));
+        broadcast({ type: 'SESSION_UPDATE' });
+        sendResponse({ ok: true });
+        break;
+      }
 
       default:
         sendResponse({ ok: false, error: 'Mensagem desconhecida.' });
     }
   })().catch((err) => {
     console.error('background error:', err);
-    setRecBadge(null);
-    patchSession({ recording: false, status: `Erro: ${err.message}` }).then(() =>
-      broadcast({ type: 'SESSION_UPDATE' })
-    );
+    patchSession({ recording: false, stopping: false, status: `Erro: ${err.message}` }).then((next) => {
+      setRecBadge(badgeFor(next));
+      broadcast({ type: 'SESSION_UPDATE' });
+    });
     sendResponse({ ok: false, error: err.message });
   });
 

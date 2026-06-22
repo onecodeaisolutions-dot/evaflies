@@ -29,6 +29,14 @@ const MIXED_BPS = 32000; // áudio de playback (voz)
 const CHANNEL_BPS = 48000; // canais p/ transcrição: 48k melhora a precisão e ainda
                            // cabe ~1h no limite de 25MB da API da OpenAI
 
+// Fila de uploads em segundo plano: roda um de cada vez. Assim a próxima
+// gravação não espera o upload da anterior, e evitamos dois uploads grandes
+// simultâneos saturando a banda (causa do "Premature close").
+let uploadChain = Promise.resolve();
+function enqueueUpload(task) {
+  uploadChain = uploadChain.then(task).catch(() => {});
+}
+
 function send(message) {
   chrome.runtime.sendMessage({ target: 'background', ...message }).catch(() => {});
 }
@@ -56,8 +64,7 @@ async function postFinalize(form) {
   let lastErr;
   for (let i = 0; i < delays.length; i++) {
     if (delays[i]) {
-      status(`Tentando novamente em alguns segundos… (${i + 1}/${delays.length})`);
-      await sleep(delays[i]);
+      await sleep(delays[i]); // upload roda em segundo plano (sem status global)
     }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 300000); // transcreve 2 canais em sequência
@@ -208,42 +215,56 @@ async function stopCapture() {
     if (r && r.rec.state !== 'inactive') r.rec.stop();
   });
 
-  let meeting = null;
-  let errorMsg = null;
+  status('Finalizando gravação…');
+
+  // Captura os dados DESTA reunião antes que uma próxima gravação sobrescreva
+  // as variáveis globais (title/nomes/sessionStartMs).
+  const capTitle = title, capSelf = selfName, capOthers = othersName;
   let mixedBlob = null;
+  let form = null;
   try {
-    status('Finalizando gravação…');
     mixedBlob = await mixedRec.done;
     const othersBlob = await tabRec.done;
     const selfBlob = micRec ? await micRec.done : null;
 
     const durationMs = sessionStartMs ? Date.now() - sessionStartMs : 0;
-    const form = new FormData();
+    form = new FormData();
     if (mixedBlob && mixedBlob.size > 1200) form.append('mixed', mixedBlob, 'mixed.webm');
     if (selfBlob && selfBlob.size > 1200) form.append('self', selfBlob, 'self.webm');
     if (othersBlob && othersBlob.size > 1200) form.append('others', othersBlob, 'others.webm');
-    form.append('title', title);
-    form.append('selfName', selfName);
-    form.append('othersName', othersName);
+    form.append('title', capTitle);
+    form.append('selfName', capSelf);
+    form.append('othersName', capOthers);
     form.append('durationMs', String(durationMs));
     form.append('summarize', 'true');
-
-    status('Conectando ao servidor…');
-    await wakeServer();
-    status('Transcrevendo no servidor… (pode levar até ~1 min)');
-    meeting = await postFinalize(form);
   } catch (err) {
-    errorMsg = err.message;
-    // Não conseguimos enviar: salva o áudio localmente para não perder a reunião.
-    if (mixedBlob && mixedBlob.size > 1200) {
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      const saved = downloadBlob(mixedBlob, `evaflies-reuniao-${stamp}.webm`);
-      if (saved) errorMsg = `${err.message} — áudio salvo em Downloads (você pode reenviar depois).`;
-    }
+    cleanup();
+    send({ type: 'CAPTURE_ERROR', error: err.message }); // não houve upload p/ enfileirar
+    return;
   }
 
+  // Libera o microfone/aba AGORA: o dispositivo fica pronto para a próxima
+  // reunião enquanto esta é enviada e transcrita em segundo plano.
   cleanup();
-  send({ type: 'CAPTURE_STOPPED', meeting, error: errorMsg });
+  send({ type: 'CAPTURE_STOPPED' });
+
+  enqueueUpload(async () => {
+    let meeting = null;
+    let errorMsg = null;
+    try {
+      await wakeServer();
+      meeting = await postFinalize(form);
+    } catch (err) {
+      errorMsg = err.message;
+      // Não conseguimos enviar: salva o áudio nos Downloads para não perder a reunião.
+      if (mixedBlob && mixedBlob.size > 1200) {
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const saved = downloadBlob(mixedBlob, `evaflies-reuniao-${stamp}.webm`);
+        if (saved) errorMsg = `${err.message} — áudio salvo em Downloads (você pode reenviar depois).`;
+      }
+    }
+    send({ type: 'FINALIZE_DONE', meeting, error: errorMsg, title: capTitle });
+  });
 }
 
 function cleanup() {
@@ -267,7 +288,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(() => sendResponse({ ok: true }))
       .catch((err) => {
         cleanup();
-        send({ type: 'CAPTURE_STOPPED', meeting: null, error: err.message });
+        send({ type: 'CAPTURE_ERROR', error: err.message });
         sendResponse({ ok: false, error: err.message });
       });
     return true;

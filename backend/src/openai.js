@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
-import { splitAudio } from './audio-split.js';
+import { splitAudio, remuxWebm } from './audio-split.js';
 
 // Modelo de transcrição: gpt-4o-transcribe-diarize — transcreve com diarização
 // e devolve segmentos com tempo (start/end) via response_format=diarized_json.
@@ -201,8 +201,18 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
   }
+  // Normaliza o container (escreve duração/cues). O webm do MediaRecorder vem
+  // sem cabeçalho de duração, e o gpt-4o-transcribe-diarize rejeita isso como
+  // "Audio file might be corrupted or unsupported". Se o remux falhar, usa o
+  // original.
+  let audio = buffer;
   try {
-    return await transcribeDiarize(buffer, filename, mimetype);
+    audio = await remuxWebm(buffer);
+  } catch (err) {
+    console.warn(`Remux pré-transcrição falhou — usando original: ${String(err?.message || err).slice(0, 120)}`);
+  }
+  try {
+    return await transcribeDiarize(audio, filename, mimetype);
   } catch (err) {
     const msg = String(err?.message || '');
     // O diarize recusa áudios longos (> ~1400s) com 400.
@@ -210,13 +220,13 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
     if (!tooLong) throw err;
     try {
       console.warn('Diarize: áudio longo — dividindo em blocos de 20min…');
-      return await transcribeDiarizeChunked(buffer, mimetype);
+      return await transcribeDiarizeChunked(audio, mimetype);
     } catch (splitErr) {
       console.warn(
         `Corte/diarização em blocos falhou (${String(splitErr?.message || splitErr).slice(0, 140)}). ` +
         'Fallback p/ whisper-1.'
       );
-      return await transcribeWhisper(buffer, filename, mimetype);
+      return await transcribeWhisper(audio, filename, mimetype);
     }
   }
 }

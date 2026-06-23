@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
-import { splitAudio, remuxWebm } from './audio-split.js';
+import { splitAudio, remuxWebm, probeDurationMs } from './audio-split.js';
 
 // Modelo de transcrição: gpt-4o-transcribe-diarize — transcreve com diarização
 // e devolve segmentos com tempo (start/end) via response_format=diarized_json.
@@ -206,20 +206,17 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
   // "Audio file might be corrupted or unsupported". Se o remux falhar, usa o
   // original.
   let audio = buffer;
+  let durationMs = null;
   try {
     audio = await remuxWebm(buffer);
+    durationMs = await probeDurationMs(audio); // já tem cabeçalho -> instantâneo
   } catch (err) {
     console.warn(`Remux pré-transcrição falhou — usando original: ${String(err?.message || err).slice(0, 120)}`);
   }
-  try {
-    return await transcribeDiarize(audio, filename, mimetype);
-  } catch (err) {
-    const msg = String(err?.message || '');
-    // O diarize recusa áudios longos (> ~1400s) com 400.
-    const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
-    if (!tooLong) throw err;
+
+  // Corte (com fallback p/ whisper-1 se o corte falhar).
+  const chunkedThenWhisper = async () => {
     try {
-      console.warn('Diarize: áudio longo — dividindo em blocos de 20min…');
       return await transcribeDiarizeChunked(audio, mimetype);
     } catch (splitErr) {
       console.warn(
@@ -228,6 +225,22 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
       );
       return await transcribeWhisper(audio, filename, mimetype);
     }
+  };
+
+  // Já sabemos que é longo (> ~23min): vai direto pro corte, sem mandar o arquivo
+  // inteiro pra OpenAI só pra ser recusado por duração.
+  if (durationMs != null && durationMs > 1380000) {
+    return chunkedThenWhisper();
+  }
+
+  try {
+    return await transcribeDiarize(audio, filename, mimetype);
+  } catch (err) {
+    const msg = String(err?.message || '');
+    // Rede de segurança: se mesmo assim vier "too long" (duração desconhecida).
+    const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
+    if (!tooLong) throw err;
+    return chunkedThenWhisper();
   }
 }
 

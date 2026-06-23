@@ -20,6 +20,42 @@ function runFfmpeg(args) {
   });
 }
 
+// Roda o ffmpeg só para capturar o stderr (onde ele imprime infos do arquivo),
+// ignorando o código de saída. Usado para ler a duração.
+function runFfmpegCapture(args) {
+  return new Promise((resolve) => {
+    if (!ffmpegPath) return resolve('');
+    const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', () => resolve(stderr));
+    proc.on('close', () => resolve(stderr));
+  });
+}
+
+/**
+ * Lê a duração de um áudio (ms). Funciona melhor em arquivos já remuxados (com
+ * cabeçalho de duração) — aí é instantâneo. Devolve null se não conseguir.
+ * @param {Buffer} buffer
+ * @returns {Promise<number|null>}
+ */
+export async function probeDurationMs(buffer) {
+  if (!ffmpegPath) return null;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eva-probe-'));
+  try {
+    const input = path.join(dir, 'in.webm');
+    await fs.writeFile(input, buffer);
+    const info = await runFfmpegCapture(['-i', input]);
+    const m = info.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    return Math.round((Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 1000);
+  } catch {
+    return null;
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
 /**
  * Divide um áudio (Buffer) em blocos de até `segmentSeconds` segundos, SEM
  * recodificar (-c copy). Devolve os blocos com o offset (em ms) de onde cada um

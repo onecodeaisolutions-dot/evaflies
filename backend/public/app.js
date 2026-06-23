@@ -108,6 +108,7 @@ function renderList() {
       `<div class="m-sub">` +
       `<span class="m-meta">${fmtDate(m.createdAt)}&nbsp;&nbsp;·&nbsp;&nbsp;${fmtDur(m.durationMs)}</span>` +
       (m.hasAudio ? '<span class="m-heard" title="Ouvida">🎧</span>' : '') +
+      (m.transcriptPreview ? '' : '<span class="m-untx" title="Ainda não transcrita">sem transcrição</span>') +
       (isAdmin && m.owner ? `<span class="owner-badge">${escapeHtml(m.owner)}</span>` : '') +
       `</div>`;
     div.addEventListener('click', () => openMeeting(m.id));
@@ -148,7 +149,23 @@ function renderDetail(m, ctx = {}) {
   }
   meta.innerHTML = metaHtml;
 
-  node.querySelector('.btn-download').addEventListener('click', () => downloadTranscript(m));
+  const hasTranscript = !!(m.segments && m.segments.length) || !!(m.transcript && m.transcript.trim());
+
+  // Baixar áudio (.webm) — quando há áudio.
+  const dlAudioBtn = node.querySelector('.btn-download-audio');
+  if (m.audioId && !share) dlAudioBtn.addEventListener('click', () => downloadAudio(m));
+  else dlAudioBtn.remove();
+
+  // Baixar transcrição (.txt) — só quando já transcrita.
+  const dlTextBtn = node.querySelector('.btn-download');
+  if (hasTranscript) dlTextBtn.addEventListener('click', () => downloadTranscript(m));
+  else dlTextBtn.remove();
+
+  // Transcrever — só quando ainda NÃO foi transcrita (e não é view pública).
+  const transcribeBtn = node.querySelector('.btn-transcribe');
+  if (!share && m.audioId && !hasTranscript) transcribeBtn.addEventListener('click', () => transcribeMeeting(m));
+  else transcribeBtn.remove();
+
   if (share) {
     // View pública: só leitura — remove renomear/excluir/compartilhar.
     node.querySelector('.btn-rename').remove();
@@ -267,7 +284,18 @@ function renderDetail(m, ctx = {}) {
       : [];
 
   if (!segments.length) {
-    transcriptEl.innerHTML = '<p class="summary-muted">Sem transcrição.</p>';
+    if (!share && m.audioId) {
+      const box = document.createElement('div');
+      box.className = 'transcribe-cta';
+      box.innerHTML =
+        '<p>Esta reunião ainda não foi transcrita.</p>' +
+        '<button class="btn btn-cta">✨ Transcrever agora</button>' +
+        '<p class="hint-sm">A transcrição roda só quando você pede (economiza custo).</p>';
+      box.querySelector('.btn-cta').addEventListener('click', () => transcribeMeeting(m));
+      transcriptEl.appendChild(box);
+    } else {
+      transcriptEl.innerHTML = '<p class="summary-muted">Sem transcrição.</p>';
+    }
   }
   const segEls = [];
   const colorFor = makeColorFor();
@@ -318,7 +346,7 @@ function renderDetail(m, ctx = {}) {
   });
 
   // --- Resumo ---
-  renderSummary(node.querySelector('.summary-wrap'), m, segments);
+  renderSummary(node.querySelector('.summary-wrap'), m, segments, !share);
 
   // --- Abas ---
   node.querySelectorAll('.tab').forEach((tab) => {
@@ -337,7 +365,23 @@ function renderDetail(m, ctx = {}) {
 // Monta o painel de Resumo. Stats são computados dos dados reais (sem inventar):
 // Duração, Participantes, Palavras e Trechos. Visão geral ← summary; Tópicos ←
 // topics; Itens de ação ← action_items.
-function renderSummary(container, m, segments) {
+function renderSummary(container, m, segments, canTranscribe) {
+  // Ainda não transcrita: convida a transcrever (o resumo depende da transcrição).
+  if (!segments.length) {
+    if (m.audioId && canTranscribe) {
+      const box = document.createElement('div');
+      box.className = 'transcribe-cta';
+      box.innerHTML =
+        '<p>Transcreva a reunião para ver o resumo, os tópicos e os itens de ação.</p>' +
+        '<button class="btn btn-cta">✨ Transcrever agora</button>';
+      box.querySelector('.btn-cta').addEventListener('click', () => transcribeMeeting(m));
+      container.innerHTML = '';
+      container.appendChild(box);
+    } else {
+      container.innerHTML = '<p class="summary-muted">Sem transcrição.</p>';
+    }
+    return;
+  }
   const speakers = new Set((m.segments || []).map((s) => s.speaker).filter(Boolean));
   const text = segments.map((s) => s.text).join(' ').trim();
   const words = text ? text.split(/\s+/).length : 0;
@@ -377,6 +421,50 @@ function renderSummary(container, m, segments) {
     `<div class="summary-col"><div class="col-title">Tópicos</div>${pointsHtml}</div>` +
     `<div class="summary-col"><div class="col-title">Itens de ação</div>${actionsHtml}</div>` +
     `</div>`;
+}
+
+// --------------------------------------------------------------------------
+// Transcrição sob demanda + download do áudio
+// --------------------------------------------------------------------------
+const safeFileName = (s) => (s || 'reuniao').replace(/[^\w\-À-ÿ ]+/g, '').trim().slice(0, 80) || 'reuniao';
+
+function downloadAudio(m) {
+  if (!m.audioId) return;
+  const nome = `${safeFileName(m.title)}.webm`;
+  const params = new URLSearchParams();
+  if (accessKey) params.set('key', accessKey);
+  params.set('download', nome);
+  const a = document.createElement('a');
+  a.href = `/api/audio/${m.audioId}.webm?${params.toString()}`;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function transcribeMeeting(m) {
+  // Estado de "transcrevendo" nos CTAs e no botão do header.
+  detailEl.querySelectorAll('.transcribe-cta').forEach((box) => {
+    box.innerHTML = '<p class="transcribing">⏳ Transcrevendo… pode levar alguns minutos em reuniões longas.</p>';
+  });
+  const headBtn = detailEl.querySelector('.btn-transcribe');
+  if (headBtn) { headBtn.disabled = true; headBtn.textContent = '⏳ Transcrevendo…'; }
+
+  try {
+    const res = await api(`/api/meetings/${m.id}/transcribe`, { method: 'POST' });
+    if (res.status === 401) return showLogin();
+    if (!res.ok) {
+      let detail = `Servidor respondeu ${res.status}`;
+      try { const e = await res.json(); if (e && e.error) detail = e.error; } catch (_) {}
+      throw new Error(detail);
+    }
+    const updated = await res.json();
+    renderDetail(updated);
+    await loadMeetings();
+  } catch (err) {
+    alert(`Falha ao transcrever: ${err.message}`);
+    openMeeting(m.id); // restaura o estado (botão Transcrever de volta)
+  }
 }
 
 // --------------------------------------------------------------------------

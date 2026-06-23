@@ -1,10 +1,6 @@
-// Offscreen document: grava o áudio da reunião e, AO PARAR, envia tudo para o
-// backend transcrever de uma vez (melhor qualidade). Sem transcrição ao vivo.
-//
-// Três gravações contínuas:
-//   - mixed (aba + microfone) -> áudio para ouvir no painel;
-//   - self  (microfone)        -> canal do vendedor (transcrição);
-//   - others (aba)             -> canal do cliente (transcrição).
+// Offscreen document: grava o áudio da reunião (aba + microfone) e, AO PARAR,
+// envia só o áudio para o backend GUARDAR — rápido, sem transcrever. A
+// transcrição é sob demanda no painel (botão "Transcrever").
 
 let audioContext = null;
 let mixedStream = null;
@@ -12,8 +8,6 @@ let tabStream = null;
 let micStream = null;
 
 let mixedRec = null;
-let micRec = null;
-let tabRec = null;
 
 let silenceTimer = null;
 let stopping = false;
@@ -21,13 +15,11 @@ let running = false;
 let sessionStartMs = 0;
 let backendUrl = '';
 let accessKey = '';
-let selfName = 'Você';
-let othersName = 'Cliente';
 let title = 'Reunião';
 
-const MIXED_BPS = 32000; // áudio de playback (voz)
-const CHANNEL_BPS = 48000; // canais p/ transcrição: 48k melhora a precisão e ainda
-                           // cabe ~1h no limite de 25MB da API da OpenAI
+// Áudio combinado (aba + microfone): serve para ouvir no painel E para a
+// transcrição sob demanda. 48k dá boa precisão de transcrição e cabe ~1h folgado.
+const MIXED_BPS = 48000;
 
 // Fila de uploads em segundo plano: roda um de cada vez. Assim a próxima
 // gravação não espera o upload da anterior, e evitamos dois uploads grandes
@@ -131,8 +123,6 @@ function makeRecorder(stream, bps) {
 async function startCapture(streamId, opts) {
   backendUrl = opts.backendUrl;
   accessKey = opts.accessKey || '';
-  selfName = opts.userName || 'Você';
-  othersName = opts.othersName || 'Cliente';
   title = opts.tabTitle || 'Reunião';
 
   // 1) Áudio da aba.
@@ -172,10 +162,8 @@ async function startCapture(streamId, opts) {
   running = true;
   stopping = false;
 
-  // 4) Gravações contínuas.
+  // 4) Gravação contínua do áudio combinado.
   mixedRec = makeRecorder(mixedStream, MIXED_BPS);
-  tabRec = makeRecorder(tabStream, CHANNEL_BPS);
-  micRec = micStream ? makeRecorder(micStream, CHANNEL_BPS) : null;
 
   // 5) Auto-parada por silêncio (reunião encerrada sem fechar a aba).
   const autoStopMs = Number(opts.autoStopSilenceMin || 0) * 60000;
@@ -213,32 +201,22 @@ async function stopCapture() {
   stopping = true;
   running = false;
   if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
-  [mixedRec, micRec, tabRec].forEach((r) => {
-    if (r && r.rec.state !== 'inactive') r.rec.stop();
-  });
+  if (mixedRec && mixedRec.rec.state !== 'inactive') mixedRec.rec.stop();
 
   status('Finalizando gravação…');
 
   // Captura os dados DESTA reunião antes que uma próxima gravação sobrescreva
-  // as variáveis globais (title/nomes/sessionStartMs).
-  const capTitle = title, capSelf = selfName, capOthers = othersName;
+  // as variáveis globais (title/sessionStartMs).
+  const capTitle = title;
   let mixedBlob = null;
   let form = null;
   try {
     mixedBlob = await mixedRec.done;
-    const othersBlob = await tabRec.done;
-    const selfBlob = micRec ? await micRec.done : null;
-
     const durationMs = sessionStartMs ? Date.now() - sessionStartMs : 0;
     form = new FormData();
     if (mixedBlob && mixedBlob.size > 1200) form.append('mixed', mixedBlob, 'mixed.webm');
-    if (selfBlob && selfBlob.size > 1200) form.append('self', selfBlob, 'self.webm');
-    if (othersBlob && othersBlob.size > 1200) form.append('others', othersBlob, 'others.webm');
     form.append('title', capTitle);
-    form.append('selfName', capSelf);
-    form.append('othersName', capOthers);
     form.append('durationMs', String(durationMs));
-    form.append('summarize', 'true');
     // Chave de idempotência: gerada UMA vez por reunião e reusada em todos os
     // retries. O servidor usa para não duplicar a reunião se a resposta se perder.
     form.append('clientId', crypto.randomUUID());
@@ -249,7 +227,7 @@ async function stopCapture() {
   }
 
   // Libera o microfone/aba AGORA: o dispositivo fica pronto para a próxima
-  // reunião enquanto esta é enviada e transcrita em segundo plano.
+  // reunião enquanto esta é enviada em segundo plano.
   cleanup();
   send({ type: 'CAPTURE_STOPPED' });
 
@@ -279,7 +257,7 @@ function cleanup() {
   if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
   if (audioContext && audioContext.state !== 'closed') audioContext.close();
   audioContext = mixedStream = tabStream = micStream = null;
-  mixedRec = micRec = tabRec = null;
+  mixedRec = null;
 }
 
 // --------------------------------------------------------------------------

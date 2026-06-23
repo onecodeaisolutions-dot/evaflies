@@ -351,6 +351,51 @@ input::placeholder { color: #52617a; }
 .btn:hover { border-color: rgba(176, 107, 255, 0.45); color: var(--title2); }
 .btn-danger { background: rgba(255, 90, 110, 0.06); border-color: rgba(255, 90, 110, 0.28); color: var(--danger-text); }
 .btn-danger:hover { background: rgba(255, 90, 110, 0.13); border-color: rgba(255, 90, 110, 0.5); color: var(--danger-text); }
+.btn-transcribe { background: rgba(176, 107, 255, 0.16); border-color: rgba(176, 107, 255, 0.5); color: #cdb2ff; }
+.btn-transcribe:hover { background: rgba(176, 107, 255, 0.24); border-color: rgba(176, 107, 255, 0.65); color: #f4ecff; }
+.btn-transcribe:disabled { opacity: 0.75; cursor: progress; }
+
+/* Convite para transcrever (estado vazio) */
+.transcribe-cta {
+  margin-top: 18px;
+  padding: 30px 22px;
+  border-radius: 16px;
+  text-align: center;
+  background: linear-gradient(135deg, rgba(176, 107, 255, 0.06), rgba(13, 20, 33, 0.5));
+  border: 1px solid rgba(176, 107, 255, 0.18);
+}
+.transcribe-cta p { margin: 0 0 14px; color: var(--soft); font-size: 14.5px; }
+.transcribe-cta .hint-sm { margin: 12px 0 0; font-size: 12.5px; color: var(--meta2); }
+.transcribe-cta .transcribing { margin: 0; color: var(--accent); font-weight: 500; }
+.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--bg);
+  background: linear-gradient(145deg, #c79bff, #8a3fe0);
+  box-shadow: 0 0 22px -6px rgba(176, 107, 255, 0.6);
+  transition: filter 0.15s;
+}
+.btn-cta:hover { filter: brightness(1.05); }
+.btn-cta:disabled { opacity: 0.75; cursor: progress; }
+
+.m-untx {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: #d8a24a;
+  background: rgba(216, 162, 74, 0.1);
+  border: 1px solid rgba(216, 162, 74, 0.22);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
 
 /* Player fixo no rodapé -------------------------------------------------- */
 .player {

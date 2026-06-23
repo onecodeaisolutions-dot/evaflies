@@ -59,20 +59,35 @@ export async function deleteAudio(id) {
   }
 }
 
-/** Responde com o áudio (redirect para URL assinada no Supabase, ou arquivo local com Range). */
-export async function serveAudio(res, id) {
+/** Carrega o áudio inteiro como Buffer (para transcrever sob demanda). */
+export async function loadAudio(id) {
+  const sid = safeId(id);
+  if (!sid) throw new Error('id inválido');
+  if (useSupabase) {
+    const { data, error } = await supabase().storage.from(SUPABASE_BUCKET).download(`${sid}.webm`);
+    if (error) throw error;
+    return Buffer.from(await data.arrayBuffer());
+  }
+  return fs.readFile(path.join(AUDIO_DIR, `${sid}.webm`));
+}
+
+/** Responde com o áudio (redirect para URL assinada no Supabase, ou arquivo local com Range).
+ *  opts.download: nome do arquivo para forçar download (Content-Disposition). */
+export async function serveAudio(res, id, opts = {}) {
   const sid = safeId(id);
   if (!sid) return res.status(400).json({ error: 'id inválido' });
+  const dl = opts.download ? String(opts.download).replace(/[^\w.\- ]+/g, '').slice(0, 100) : null;
 
   if (useSupabase) {
     const { data, error } = await supabase()
       .storage.from(SUPABASE_BUCKET)
-      .createSignedUrl(`${sid}.webm`, SIGNED_URL_TTL);
+      .createSignedUrl(`${sid}.webm`, SIGNED_URL_TTL, dl ? { download: dl } : undefined);
     if (error || !data?.signedUrl) return res.status(404).json({ error: 'áudio não encontrado' });
     return res.redirect(data.signedUrl);
   }
 
   // Local: sendFile já dá suporte a Range requests (seek).
+  if (dl) res.setHeader('Content-Disposition', `attachment; filename="${dl}"`);
   res.type('audio/webm');
   return res.sendFile(path.join(AUDIO_DIR, `${sid}.webm`), (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: 'áudio não encontrado' });

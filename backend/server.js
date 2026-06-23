@@ -34,7 +34,7 @@ import {
   updateMeeting,
   deleteMeeting,
 } from './src/store.js';
-import { initAudioStore, saveAudio, serveAudio, deleteAudio } from './src/audio-store.js';
+import { initAudioStore, saveAudio, serveAudio, deleteAudio, loadAudio } from './src/audio-store.js';
 import { storageMode } from './src/storage-config.js';
 import { requireUser, ownerFilter, listOwnerFilter, listUsers, authEnabled } from './src/auth.js';
 
@@ -117,7 +117,8 @@ app.post(
 
 // Servir o áudio (local: arquivo com Range; Supabase: redirect para URL assinada).
 // O <audio> não envia headers, então a chave pode vir por ?key= (tratada em requireUser).
-app.get('/api/audio/:id', requireUser, wrap((req, res) => serveAudio(res, req.params.id.replace(/\.webm$/, ''))));
+app.get('/api/audio/:id', requireUser, wrap((req, res) =>
+  serveAudio(res, req.params.id.replace(/\.webm$/, ''), { download: req.query.download })));
 
 // --- Resumo de uma transcrição -------------------------------------------
 app.post(
@@ -166,9 +167,8 @@ app.post('/api/meetings', requireUser, wrap(async (req, res) => {
   res.status(201).json(meeting);
 }));
 
-// Finalização no FINAL da reunião: recebe o áudio mixado (playback) + os dois
-// canais (vendedor/cliente), transcreve cada canal inteiro com timestamps,
-// intercala por tempo, resume e cria a reunião. (Fluxo da extensão 1.1+.)
+// Finalização no FINAL da reunião: apenas SALVA o áudio e cria a reunião (rápido,
+// SEM transcrever). A transcrição é sob demanda em /api/meetings/:id/transcribe.
 app.post(
   '/api/meetings/finalize',
   requireUser,
@@ -179,81 +179,31 @@ app.post(
   ]),
   wrap(async (req, res) => {
     const files = req.files || {};
-    const { title, selfName, othersName, durationMs, clientId } = req.body || {};
-    const wantSummary = req.body?.summarize !== 'false';
+    const { title, durationMs, clientId } = req.body || {};
 
-    const mixed = files.mixed?.[0];
-    const sf = files.self?.[0];
-    const ot = files.others?.[0];
+    // Usa o mixed (playback). Aceita self/others de extensões antigas, mas só
+    // guarda um arquivo de áudio.
+    const mixed = files.mixed?.[0] || files.self?.[0] || files.others?.[0];
 
-    // 0) Idempotência: evita duplicar a reunião quando a extensão reenvia (retry).
-    //    Extensões novas mandam um clientId; para as antigas (sem clientId),
-    //    derivamos a chave do HASH do áudio — como o retry envia os MESMOS bytes,
-    //    o hash é igual e a reunião não duplica (funciona em qualquer versão).
-    const idemKey = clientId || audioFingerprint(mixed, sf, ot);
+    // Idempotência: evita duplicar a reunião quando a extensão reenvia (retry).
+    // Extensões novas mandam clientId; sem ele, derivamos do hash do áudio.
+    const idemKey = clientId || audioFingerprint(mixed, files.self?.[0], files.others?.[0]);
     if (idemKey) {
       const dup = await getMeetingByClientId(idemKey);
       if (dup) return res.status(200).json(dup);
     }
 
-    // 1) Salva o áudio mixado (para reprodução no painel).
     let audioId = null;
     if (mixed && mixed.size > 1200) {
       audioId = await saveAudio(mixed.buffer, mixed.mimetype || 'audio/webm');
     }
 
-    // 2) Transcreve os dois canais EM SEQUÊNCIA (não em paralelo): dois uploads
-    //    grandes simultâneos saturam a banda do host e derrubam a conexão com a
-    //    OpenAI ("Premature close").
-    let selfSegs = [];
-    let otherSegs = [];
-    try {
-      selfSegs =
-        sf && sf.size > 1200
-          ? (await transcribeVerbose(sf.buffer, 'self.webm')).map((s) => ({
-              ...s,
-              speaker: selfName || 'Você',
-            }))
-          : [];
-      otherSegs =
-        ot && ot.size > 1200
-          ? (await transcribeVerbose(ot.buffer, 'others.webm')).map((s) => ({
-              ...s,
-              speaker: othersName || 'Cliente',
-            }))
-          : [];
-    } catch (err) {
-      const e = new Error(`Falha na transcrição (OpenAI): ${err.message}`);
-      e.status = 502; // erro do serviço de transcrição, não do nosso app
-      throw e;
-    }
-
-    let segments = [...selfSegs, ...otherSegs].sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
-    // Reenvio de áudio salvo: só veio o arquivo mixado (sem canais separados).
-    // Aqui aproveitamos a diarização do modelo para rotular os locutores (A/B/…).
-    if (!segments.length && mixed && mixed.size > 1200) {
-      segments = await transcribeVerbose(mixed.buffer, 'mixed.webm');
-    }
-    const transcript = segments
-      .map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text))
-      .join('\n');
-
-    // 3) Resumo.
-    let summary = null;
-    if (wantSummary && transcript.trim()) {
-      try {
-        summary = await summarize(transcript, title);
-      } catch (err) {
-        console.error('Falha ao resumir:', err.message);
-      }
-    }
-
     const owner = req.user ? req.user.id : null;
     const meeting = await createMeeting({
       title,
-      transcript,
-      segments,
-      summary,
+      transcript: '',
+      segments: [],
+      summary: null,
       durationMs: Number(durationMs) || 0,
       audioId,
       owner,
@@ -262,6 +212,44 @@ app.post(
     res.status(201).json(meeting);
   })
 );
+
+// Transcrição SOB DEMANDA: baixa o áudio salvo, transcreve (diarização A/B),
+// resume e atualiza a reunião. Idempotente (se já transcrita, devolve como está).
+app.post('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
+  const meeting = await getMeeting(req.params.id, ownerFilter(req));
+  if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+  if (meeting.segments && meeting.segments.length) return res.json(meeting); // já transcrita
+  if (!meeting.audioId) return res.status(400).json({ error: 'Esta reunião não tem áudio para transcrever.' });
+
+  let buffer;
+  try {
+    buffer = await loadAudio(meeting.audioId);
+  } catch (err) {
+    return res.status(404).json({ error: 'Áudio não encontrado no armazenamento.' });
+  }
+
+  let segments;
+  try {
+    segments = await transcribeVerbose(buffer, 'audio.webm');
+  } catch (err) {
+    const e = new Error(`Falha na transcrição (OpenAI): ${err.message}`);
+    e.status = 502;
+    throw e;
+  }
+
+  const transcript = segments.map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text)).join('\n');
+  let summary = null;
+  if (transcript.trim()) {
+    try {
+      summary = await summarize(transcript, meeting.title);
+    } catch (err) {
+      console.error('Falha ao resumir:', err.message);
+    }
+  }
+
+  const updated = await updateMeeting(meeting.id, { transcript, segments, summary });
+  res.json(updated);
+}));
 
 app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
   // Garante que o usuário só altera reuniões que pode ver.

@@ -229,8 +229,9 @@ app.post('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
   }
 
   let segments;
+  let measuredMs = null;
   try {
-    segments = await transcribeVerbose(buffer, 'audio.webm');
+    ({ segments, durationMs: measuredMs } = await transcribeVerbose(buffer, 'audio.webm'));
   } catch (err) {
     const e = new Error(`Falha na transcrição (OpenAI): ${err.message}`);
     e.status = 502;
@@ -247,7 +248,11 @@ app.post('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
     }
   }
 
-  const updated = await updateMeeting(meeting.id, { transcript, segments, summary });
+  // Conserta a duração se ela tiver vindo zerada (ex.: áudio reenviado manualmente).
+  const patch = { transcript, segments, summary };
+  if (!meeting.durationMs && measuredMs) patch.durationMs = measuredMs;
+
+  const updated = await updateMeeting(meeting.id, patch);
   res.json(updated);
 }));
 

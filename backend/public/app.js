@@ -574,6 +574,36 @@ function fixWebmDuration(audio) {
   audio.addEventListener('loadedmetadata', onMeta, { once: true });
 }
 
+// Lê a duração (ms) de um arquivo de áudio. O webm do MediaRecorder vem sem
+// duração no cabeçalho (fica Infinity), então forçamos o cálculo buscando o fim.
+// Resolve em 0 se não der (não trava o upload).
+function readMediaDurationMs(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('audio');
+    a.preload = 'metadata';
+    let done = false;
+    const finish = (ms) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      resolve(Math.max(0, Math.round(ms || 0)));
+    };
+    const timer = setTimeout(() => finish(0), 8000); // rede de segurança
+    a.addEventListener('loadedmetadata', () => {
+      if (a.duration && isFinite(a.duration)) return finish(a.duration * 1000);
+      a.addEventListener('timeupdate', function onU() {
+        a.removeEventListener('timeupdate', onU);
+        finish(isFinite(a.duration) ? a.duration * 1000 : 0);
+      });
+      a.currentTime = 1e101; // dispara o recálculo da duração no webm
+    });
+    a.addEventListener('error', () => finish(0));
+    a.src = url;
+  });
+}
+
 // --------------------------------------------------------------------------
 // Login / usuário
 // --------------------------------------------------------------------------
@@ -708,13 +738,13 @@ resendFile.addEventListener('change', async () => {
   if (!file) return;
   const label = resendBtn.innerHTML;
   resendBtn.disabled = true;
-  resendBtn.textContent = '⏳ Transcrevendo… (pode levar ~1 min)';
+  resendBtn.textContent = '⏳ Enviando áudio…';
   try {
+    const durationMs = await readMediaDurationMs(file);
     const fd = new FormData();
     fd.append('mixed', file, file.name);
     fd.append('title', file.name.replace(/\.[^.]+$/, '') || 'Áudio reenviado');
-    fd.append('durationMs', '0');
-    fd.append('summarize', 'true');
+    fd.append('durationMs', String(durationMs || 0));
     const res = await api('/api/meetings/finalize', { method: 'POST', body: fd });
     if (res.status === 401) return showLogin();
     if (!res.ok) {

@@ -195,7 +195,7 @@ async function transcribeDiarizeChunked(buffer, mimetype) {
  * @param {Buffer} buffer
  * @param {string} filename
  * @param {string} [mimetype]
- * @returns {Promise<Array<{startMs:number,endMs:number,text:string,speaker:string|null}>>}
+ * @returns {Promise<{segments:Array<{startMs:number,endMs:number,text:string,speaker:string|null}>, durationMs:number|null}>}
  */
 export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
   if (!process.env.OPENAI_API_KEY) {
@@ -229,19 +229,21 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
 
   // Já sabemos que é longo (> ~23min): vai direto pro corte, sem mandar o arquivo
   // inteiro pra OpenAI só pra ser recusado por duração.
+  let segments;
   if (durationMs != null && durationMs > 1380000) {
-    return chunkedThenWhisper();
+    segments = await chunkedThenWhisper();
+  } else {
+    try {
+      segments = await transcribeDiarize(audio, filename, mimetype);
+    } catch (err) {
+      const msg = String(err?.message || '');
+      // Rede de segurança: se mesmo assim vier "too long" (duração desconhecida).
+      const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
+      if (!tooLong) throw err;
+      segments = await chunkedThenWhisper();
+    }
   }
-
-  try {
-    return await transcribeDiarize(audio, filename, mimetype);
-  } catch (err) {
-    const msg = String(err?.message || '');
-    // Rede de segurança: se mesmo assim vier "too long" (duração desconhecida).
-    const tooLong = err?.status === 400 && /maximum|longer than|duration|1400/i.test(msg);
-    if (!tooLong) throw err;
-    return chunkedThenWhisper();
-  }
+  return { segments, durationMs };
 }
 
 /**

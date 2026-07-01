@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 import nodeFetch from 'node-fetch';
 import FormData from 'form-data';
-import { splitAudio, remuxWebm, probeDurationMs } from './audio-split.js';
+import { splitAudio, remuxWebm, probeDurationMs, extractClipWav } from './audio-split.js';
 
 // Modelo de transcrição: gpt-4o-transcribe-diarize — transcreve com diarização
 // e devolve segmentos com tempo (start/end) via response_format=diarized_json.
@@ -135,7 +135,9 @@ async function postTranscription(buildForm, label) {
 
 // Transcrição com diarização (gpt-4o-transcribe-diarize). Limite do modelo:
 // ~1400s (≈23min) de áudio, mesmo com chunking_strategy=auto.
-async function transcribeDiarize(buffer, filename, mimetype) {
+// `knownSpeakers` (opcional): [{name, wav}] — amostras de voz de referência; o
+// modelo rotula os segmentos com esses nomes em vez de recomeçar em A/B.
+async function transcribeDiarize(buffer, filename, mimetype, knownSpeakers = null) {
   const result = await postTranscription(() => {
     const form = new FormData();
     form.append('file', buffer, { filename, contentType: mimetype });
@@ -143,9 +145,39 @@ async function transcribeDiarize(buffer, filename, mimetype) {
     form.append('language', TRANSCRIBE_LANGUAGE);
     form.append('response_format', 'diarized_json'); // segmentos com tempo + locutor
     form.append('chunking_strategy', 'auto'); // obrigatório para áudios > 30s
+    for (const sp of knownSpeakers || []) {
+      form.append('known_speaker_names[]', sp.name);
+      form.append('known_speaker_references[]', `data:audio/wav;base64,${sp.wav.toString('base64')}`);
+    }
     return form;
   }, 'diarize');
   return diarizedToSegments(result);
+}
+
+// Escolhe, por locutor, um trecho bom para servir de amostra de voz: o segmento
+// mais longo daquele locutor (mín. 2.5s, cortado a 8s). Devolve [{name, wav}]
+// ou null se não der (aí os blocos seguintes diarizam sem referência).
+async function buildSpeakerRefs(chunkBuffer, segments) {
+  const bySpeaker = new Map();
+  for (const s of segments) {
+    if (!s.speaker) continue;
+    const dur = s.endMs - s.startMs;
+    const best = bySpeaker.get(s.speaker);
+    if (!best || dur > best.dur) bySpeaker.set(s.speaker, { startMs: s.startMs, dur });
+  }
+  if (!bySpeaker.size) return null;
+  try {
+    const refs = [];
+    for (const [name, seg] of bySpeaker) {
+      if (seg.dur < 2500) continue; // curto demais para caracterizar a voz
+      const durMs = Math.min(seg.dur, 8000);
+      refs.push({ name, wav: await extractClipWav(chunkBuffer, seg.startMs, durMs) });
+    }
+    return refs.length ? refs : null;
+  } catch (err) {
+    console.warn(`Amostras de locutor indisponíveis (${String(err?.message || err).slice(0, 100)}) — seguindo sem referência.`);
+    return null;
+  }
 }
 
 // Fallback: whisper-1 com verbose_json (sem limite prático de duração, mas
@@ -165,20 +197,40 @@ async function transcribeWhisper(buffer, filename, mimetype) {
 
 /**
  * Áudio longo: divide em blocos de ~20min, diariza cada bloco e junta tudo
- * corrigindo os timestamps pelo offset de cada bloco.
+ * corrigindo os timestamps pelo offset de cada bloco. Para manter os locutores
+ * CONSISTENTES entre os blocos, extrai amostras de voz do primeiro bloco e as
+ * passa como referência nos seguintes (senão cada bloco recomeçaria em A/B).
  */
-async function transcribeDiarizeChunked(buffer, mimetype) {
+async function transcribeDiarizeChunked(buffer, mimetype, onProgress = null) {
   const { chunks, cleanup } = await splitAudio(buffer, 1200); // 20min < teto de ~1400s
   try {
     const all = [];
+    let refs = null;
     // Sequencial (não paralelo): dois uploads grandes ao mesmo tempo saturam a
     // banda do host e derrubam a conexão com a OpenAI ("Premature close").
     for (let i = 0; i < chunks.length; i++) {
       const { buffer: buf, startMs } = chunks[i];
-      const segs = await transcribeDiarize(buf, `chunk${i}.webm`, mimetype);
+      let segs;
+      try {
+        segs = await transcribeDiarize(buf, `chunk${i}.webm`, mimetype, refs);
+      } catch (err) {
+        // Se a API recusar as referências (parâmetro/formato), não perde o bloco:
+        // repete sem referência e desliga a consistência daqui em diante.
+        if (refs && Number(err?.status) === 400) {
+          console.warn(`Referências de locutor recusadas no bloco ${i} — seguindo sem (rótulos podem variar): ${String(err?.message).slice(0, 140)}`);
+          refs = null;
+          segs = await transcribeDiarize(buf, `chunk${i}.webm`, mimetype);
+        } else {
+          throw err;
+        }
+      }
+      if (i === 0 && chunks.length > 1) {
+        refs = await buildSpeakerRefs(buf, segs);
+      }
       for (const s of segs) {
         all.push({ ...s, startMs: s.startMs + startMs, endMs: s.endMs + startMs });
       }
+      if (onProgress) onProgress(i + 1, chunks.length);
     }
     all.sort((a, b) => a.startMs - b.startMs);
     return collapseRepeats(all);
@@ -195,9 +247,10 @@ async function transcribeDiarizeChunked(buffer, mimetype) {
  * @param {Buffer} buffer
  * @param {string} filename
  * @param {string} [mimetype]
+ * @param {(current:number, total:number) => void} [onProgress] blocos concluídos (áudio longo)
  * @returns {Promise<{segments:Array<{startMs:number,endMs:number,text:string,speaker:string|null}>, durationMs:number|null}>}
  */
-export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm') {
+export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetype = 'audio/webm', onProgress = null) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY não configurada. Veja backend/.env.example');
   }
@@ -217,7 +270,7 @@ export async function transcribeVerbose(buffer, filename = 'audio.webm', mimetyp
   // Corte (com fallback p/ whisper-1 se o corte falhar).
   const chunkedThenWhisper = async () => {
     try {
-      return await transcribeDiarizeChunked(audio, mimetype);
+      return await transcribeDiarizeChunked(audio, mimetype, onProgress);
     } catch (splitErr) {
       console.warn(
         `Corte/diarização em blocos falhou (${String(splitErr?.message || splitErr).slice(0, 140)}). ` +

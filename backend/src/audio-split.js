@@ -123,3 +123,33 @@ export async function remuxWebm(buffer) {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * Recorta um trecho do áudio e devolve como WAV 16kHz mono (formato pequeno e
+ * universal — usado como amostra de voz de referência na diarização).
+ * @param {Buffer} buffer áudio de origem (webm)
+ * @param {number} startMs início do trecho
+ * @param {number} durMs duração do trecho
+ * @returns {Promise<Buffer>} wav pcm16 16kHz mono
+ */
+export async function extractClipWav(buffer, startMs, durMs) {
+  if (!ffmpegPath) throw new Error('ffmpeg-static não disponível');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eva-clip-'));
+  try {
+    const input = path.join(dir, 'in.webm');
+    const output = path.join(dir, 'out.wav');
+    await fs.writeFile(input, buffer);
+    await runFfmpeg([
+      '-ss', (startMs / 1000).toFixed(3),
+      '-t', (durMs / 1000).toFixed(3),
+      '-i', input,
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'pcm_s16le',
+      output,
+    ]);
+    return await fs.readFile(output);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}

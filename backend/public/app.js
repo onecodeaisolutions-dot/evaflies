@@ -163,8 +163,12 @@ function renderDetail(m, ctx = {}) {
 
   // Transcrever — só quando ainda NÃO foi transcrita (e não é view pública).
   const transcribeBtn = node.querySelector('.btn-transcribe');
-  if (!share && m.audioId && !hasTranscript) transcribeBtn.addEventListener('click', () => transcribeMeeting(m));
-  else transcribeBtn.remove();
+  if (!share && m.audioId && !hasTranscript) {
+    transcribeBtn.addEventListener('click', () => transcribeMeeting(m));
+    resumeTranscriptionIfRunning(m); // job já rodando? (página recarregada no meio)
+  } else {
+    transcribeBtn.remove();
+  }
 
   if (share) {
     // View pública: só leitura — remove renomear/excluir/compartilhar.
@@ -442,14 +446,61 @@ function downloadAudio(m) {
   a.remove();
 }
 
-async function transcribeMeeting(m) {
-  // Estado de "transcrevendo" nos CTAs e no botão do header.
+// Mostra o andamento nos CTAs e no botão do header.
+function setTranscribingUI(text) {
   detailEl.querySelectorAll('.transcribe-cta').forEach((box) => {
-    box.innerHTML = '<p class="transcribing">⏳ Transcrevendo… pode levar alguns minutos em reuniões longas.</p>';
+    box.innerHTML = `<p class="transcribing">⏳ ${escapeHtml(text)}</p>`;
   });
   const headBtn = detailEl.querySelector('.btn-transcribe');
   if (headBtn) { headBtn.disabled = true; headBtn.textContent = '⏳ Transcrevendo…'; }
+}
 
+// Acompanha o job de transcrição (a cada 7s) até terminar. Reuniões longas são
+// processadas em blocos de ~20min; o status traz "bloco atual/total".
+const pollingIds = new Set(); // evita dois loops para a mesma reunião
+async function pollTranscription(id) {
+  if (pollingIds.has(id)) return;
+  pollingIds.add(id);
+  const progressText = (st) =>
+    st.total > 1
+      ? `Transcrevendo… bloco ${Math.min(st.current + 1, st.total)} de ${st.total} (reunião longa — pode levar vários minutos).`
+      : 'Transcrevendo… pode levar alguns minutos.';
+  try {
+    while (true) {
+      await new Promise((r) => setTimeout(r, 7000));
+      let st;
+      try {
+        const res = await api(`/api/meetings/${id}/transcribe`);
+        if (res.status === 401) return showLogin();
+        if (res.status === 404) return; // reunião excluída no meio
+        if (!res.ok) continue; // instabilidade momentânea: tenta no próximo tick
+        st = await res.json();
+      } catch (_) {
+        continue;
+      }
+      if (st.state === 'done') {
+        await loadMeetings();
+        if (activeId === id) openMeeting(id);
+        return;
+      }
+      if (st.state === 'error' || st.state === 'idle') {
+        // idle = o servidor reiniciou no meio do job (o job vive em memória).
+        const msg = st.error || 'O servidor reiniciou durante a transcrição. Tente de novo.';
+        if (activeId === id) {
+          alert(`Falha ao transcrever: ${msg}`);
+          openMeeting(id); // restaura o botão Transcrever
+        }
+        return;
+      }
+      if (activeId === id) setTranscribingUI(progressText(st));
+    }
+  } finally {
+    pollingIds.delete(id);
+  }
+}
+
+async function transcribeMeeting(m) {
+  setTranscribingUI('Transcrevendo… pode levar alguns minutos.');
   try {
     const res = await api(`/api/meetings/${m.id}/transcribe`, { method: 'POST' });
     if (res.status === 401) return showLogin();
@@ -458,13 +509,29 @@ async function transcribeMeeting(m) {
       try { const e = await res.json(); if (e && e.error) detail = e.error; } catch (_) {}
       throw new Error(detail);
     }
-    const updated = await res.json();
-    renderDetail(updated);
+    if (res.status === 202) return pollTranscription(m.id); // job em segundo plano
+    // 200: já estava transcrita — mostra direto.
+    renderDetail(await res.json());
     await loadMeetings();
   } catch (err) {
     alert(`Falha ao transcrever: ${err.message}`);
     openMeeting(m.id); // restaura o estado (botão Transcrever de volta)
   }
+}
+
+// Ao abrir uma reunião ainda sem transcrição: se já existe um job rodando (ex.:
+// a página foi recarregada no meio), retoma o acompanhamento em vez de mostrar
+// o botão parado.
+async function resumeTranscriptionIfRunning(m) {
+  try {
+    const res = await api(`/api/meetings/${m.id}/transcribe`);
+    if (!res.ok) return;
+    const st = await res.json();
+    if (st.state === 'running' && activeId === m.id) {
+      setTranscribingUI('Transcrevendo… retomando o acompanhamento.');
+      pollTranscription(m.id);
+    }
+  } catch (_) {}
 }
 
 // --------------------------------------------------------------------------

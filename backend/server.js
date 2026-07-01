@@ -53,10 +53,11 @@ const uploadAudio = multer({
   limits: { fileSize: 200 * 1024 * 1024 },
 });
 
-// Finalização (novo fluxo): áudio mixado + 2 canais. Limite por arquivo 40MB.
+// Finalização: só o áudio da reunião. Limite 200MB (3h a 48kbps ≈ 65MB; folga
+// para reuniões muito longas ou bitrates maiores).
 const uploadFinalize = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 40 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 },
 });
 
 // Wrapper para capturar erros de handlers async.
@@ -213,47 +214,66 @@ app.post(
   })
 );
 
-// Transcrição SOB DEMANDA: baixa o áudio salvo, transcreve (diarização A/B),
-// resume e atualiza a reunião. Idempotente (se já transcrita, devolve como está).
+// Transcrição SOB DEMANDA, em segundo plano: reuniões longas levam vários
+// minutos (blocos de 20min transcritos em sequência) e estourariam o timeout de
+// um request síncrono. O POST dispara o job e devolve 202; o painel acompanha
+// pelo GET (progresso por bloco) até terminar.
+// Jobs em memória: se o servidor reiniciar no meio, o job some e o painel volta
+// a oferecer o botão — é só transcrever de novo.
+const transcribeJobs = new Map(); // meetingId -> {state, current, total, error}
+
+async function runTranscription(meeting) {
+  const job = { state: 'running', current: 0, total: 0, error: null };
+  transcribeJobs.set(meeting.id, job);
+  try {
+    const buffer = await loadAudio(meeting.audioId);
+    const { segments, durationMs: measuredMs } = await transcribeVerbose(
+      buffer, 'audio.webm', 'audio/webm',
+      (current, total) => { job.current = current; job.total = total; }
+    );
+
+    const transcript = segments.map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text)).join('\n');
+    let summary = null;
+    if (transcript.trim()) {
+      try {
+        summary = await summarize(transcript, meeting.title);
+      } catch (err) {
+        console.error('Falha ao resumir:', err.message);
+      }
+    }
+
+    // Conserta a duração se ela tiver vindo zerada (ex.: áudio reenviado manualmente).
+    const patch = { transcript, segments, summary };
+    if (!meeting.durationMs && measuredMs) patch.durationMs = measuredMs;
+    await updateMeeting(meeting.id, patch);
+    transcribeJobs.delete(meeting.id); // done: o GET passa a responder pela reunião
+  } catch (err) {
+    console.error(`Transcrição da reunião ${meeting.id} falhou:`, err);
+    job.state = 'error';
+    job.error = `Falha na transcrição: ${err.message}`;
+  }
+}
+
 app.post('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
   const meeting = await getMeeting(req.params.id, ownerFilter(req));
   if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
   if (meeting.segments && meeting.segments.length) return res.json(meeting); // já transcrita
   if (!meeting.audioId) return res.status(400).json({ error: 'Esta reunião não tem áudio para transcrever.' });
 
-  let buffer;
-  try {
-    buffer = await loadAudio(meeting.audioId);
-  } catch (err) {
-    return res.status(404).json({ error: 'Áudio não encontrado no armazenamento.' });
+  const existing = transcribeJobs.get(meeting.id);
+  if (existing && existing.state === 'running') {
+    return res.status(202).json(existing); // já está rodando: só acompanhar
   }
+  runTranscription(meeting); // sem await: roda em segundo plano
+  res.status(202).json({ state: 'running', current: 0, total: 0 });
+}));
 
-  let segments;
-  let measuredMs = null;
-  try {
-    ({ segments, durationMs: measuredMs } = await transcribeVerbose(buffer, 'audio.webm'));
-  } catch (err) {
-    const e = new Error(`Falha na transcrição (OpenAI): ${err.message}`);
-    e.status = 502;
-    throw e;
-  }
-
-  const transcript = segments.map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text)).join('\n');
-  let summary = null;
-  if (transcript.trim()) {
-    try {
-      summary = await summarize(transcript, meeting.title);
-    } catch (err) {
-      console.error('Falha ao resumir:', err.message);
-    }
-  }
-
-  // Conserta a duração se ela tiver vindo zerada (ex.: áudio reenviado manualmente).
-  const patch = { transcript, segments, summary };
-  if (!meeting.durationMs && measuredMs) patch.durationMs = measuredMs;
-
-  const updated = await updateMeeting(meeting.id, patch);
-  res.json(updated);
+// Status da transcrição (polling do painel).
+app.get('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
+  const meeting = await getMeeting(req.params.id, ownerFilter(req));
+  if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+  if (meeting.segments && meeting.segments.length) return res.json({ state: 'done' });
+  res.json(transcribeJobs.get(meeting.id) || { state: 'idle' });
 }));
 
 app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
@@ -327,6 +347,9 @@ app.use(express.static(PUBLIC_DIR));
 // --- Tratamento de erros --------------------------------------------------
 app.use((err, req, res, next) => {
   console.error('Erro:', err);
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'Arquivo de áudio grande demais (limite: 200MB).' });
+  }
   const status = err.status || err.statusCode || 500;
   res.status(status).json({ error: err.message || 'Erro interno.' });
 });

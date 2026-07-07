@@ -13,7 +13,7 @@ const tpl = document.getElementById('detail-template');
 
 let meetings = [];
 let activeId = null;
-let isAdmin = false;
+let canSeeOthers = false;
 let accessKey = localStorage.getItem('eva_key') || '';
 let playbackSpeed = parseFloat(localStorage.getItem('eva_speed')) || 1;
 
@@ -83,7 +83,7 @@ async function loadMeetings() {
   if (searchEl.value.trim()) params.set('q', searchEl.value.trim());
   if (fromEl.value) params.set('from', fromEl.value);
   if (toEl.value) params.set('to', toEl.value);
-  if (isAdmin && ownerFilterEl.value) params.set('owner', ownerFilterEl.value);
+  if (canSeeOthers && ownerFilterEl.value) params.set('owner', ownerFilterEl.value);
   const qs = params.toString();
   const res = await api(`/api/meetings${qs ? `?${qs}` : ''}`);
   if (res.status === 401) return showLogin();
@@ -109,7 +109,7 @@ function renderList() {
       `<span class="m-meta">${fmtDate(m.createdAt)}&nbsp;&nbsp;·&nbsp;&nbsp;${fmtDur(m.durationMs)}</span>` +
       (m.hasAudio ? '<span class="m-heard" title="Ouvida">🎧</span>' : '') +
       (m.transcriptPreview ? '' : '<span class="m-untx" title="Ainda não transcrita">sem transcrição</span>') +
-      (isAdmin && m.owner ? `<span class="owner-badge">${escapeHtml(m.owner)}</span>` : '') +
+      (canSeeOthers && m.owner ? `<span class="owner-badge">${escapeHtml(m.owner)}</span>` : '') +
       `</div>`;
     div.addEventListener('click', () => openMeeting(m.id));
     listEl.appendChild(div);
@@ -144,7 +144,7 @@ function renderDetail(m, ctx = {}) {
 
   const meta = node.querySelector('.meta');
   let metaHtml = `<span>${fmtDate(m.createdAt)}</span><span class="sep">•</span><span>${fmtDur(m.durationMs)}</span>`;
-  if (isAdmin && m.owner) {
+  if (canSeeOthers && m.owner) {
     metaHtml += `<span class="sep">•</span><span class="owner"><span class="dot"></span>${escapeHtml(m.owner)}</span>`;
   }
   meta.innerHTML = metaHtml;
@@ -691,7 +691,7 @@ function renderUserbar(user) {
   const initial = (user.name || '?').trim().charAt(0).toUpperCase() || '?';
   userbarEl.innerHTML =
     `<div class="u-info"><div class="u-avatar">${escapeHtml(initial)}</div>` +
-    `<span class="u-name">${escapeHtml(user.name)}${user.admin ? ' <small>(admin)</small>' : ''}</span></div>` +
+    `<span class="u-name">${escapeHtml(user.name)}${user.admin ? ' <small>(admin)</small>' : user.supervisor ? ' <small>(supervisor)</small>' : ''}</span></div>` +
     `<button id="logout" class="u-logout">Sair</button>`;
   document.getElementById('logout').addEventListener('click', () => {
     localStorage.removeItem('eva_key');
@@ -844,7 +844,7 @@ async function populateOwners() {
   for (const u of users) {
     const o = document.createElement('option');
     o.value = u.id;
-    o.textContent = u.name + (u.admin ? ' (admin)' : '');
+    o.textContent = u.name + (u.admin ? ' (admin)' : u.supervisor ? ' (supervisor)' : '');
     ownerFilterEl.appendChild(o);
   }
   ownerWrapEl.classList.remove('hidden');
@@ -858,9 +858,9 @@ async function start() {
   const meRes = await api('/api/me');
   if (meRes.status === 401) return showLogin();
   const me = await meRes.json();
-  isAdmin = Boolean(me.user && me.user.admin);
+  canSeeOthers = Boolean(me.user && (me.user.admin || me.user.supervisor));
   if (me.authEnabled && me.user) renderUserbar(me.user);
-  if (isAdmin) await populateOwners();
+  if (canSeeOthers) await populateOwners();
   await loadMeetings();
   const id = new URLSearchParams(location.search).get('id');
   if (id) openMeeting(id);

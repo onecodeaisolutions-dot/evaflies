@@ -21,6 +21,13 @@ function toMeeting(row) {
   };
 }
 
+// Filtro de dono: string = um dono; array = qualquer um deles (visão do
+// supervisor). Devolve a query já filtrada.
+function applyOwner(query, ownerId) {
+  if (!ownerId) return query;
+  return Array.isArray(ownerId) ? query.in('owner', ownerId) : query.eq('owner', ownerId);
+}
+
 export async function initStore() {
   // Verifica se a tabela existe / está acessível.
   const { error } = await supabase().from(TABLE).select('id').limit(1);
@@ -46,7 +53,7 @@ export async function listMeetings(ownerId, opts = {}) {
     .from(TABLE)
     .select('id,title,summary,duration_ms,audio_id,created_at,transcript,owner')
     .order('created_at', { ascending: false });
-  if (ownerId) query = query.eq('owner', ownerId);
+  query = applyOwner(query, ownerId);
   if (opts.from) query = query.gte('created_at', opts.from);
   if (opts.to) query = query.lte('created_at', opts.to);
   if (opts.q) {
@@ -70,8 +77,7 @@ export async function listMeetings(ownerId, opts = {}) {
 }
 
 export async function getMeeting(id, ownerId) {
-  let query = supabase().from(TABLE).select('*').eq('id', id);
-  if (ownerId) query = query.eq('owner', ownerId);
+  let query = applyOwner(supabase().from(TABLE).select('*').eq('id', id), ownerId);
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return toMeeting(data);
@@ -146,8 +152,7 @@ export async function getMeetingByClientId(clientId) {
 }
 
 export async function deleteMeeting(id, ownerId) {
-  let query = supabase().from(TABLE).delete().eq('id', id);
-  if (ownerId) query = query.eq('owner', ownerId);
+  const query = applyOwner(supabase().from(TABLE).delete().eq('id', id), ownerId);
   const { error } = await query;
   if (error) throw error;
   return true;

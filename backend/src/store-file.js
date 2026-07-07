@@ -43,13 +43,18 @@ export async function ping() {
   return true;
 }
 
+// Filtro de dono: null/'' = todos; string = um dono; array = qualquer um deles
+// (visão do supervisor).
+const ownerMatch = (m, ownerId) =>
+  !ownerId || (Array.isArray(ownerId) ? ownerId.includes(m.owner) : m.owner === ownerId);
+
 /** Lista as reuniões (mais recentes primeiro), sem o transcript completo.
- *  ownerId: filtra por dono. opts: { q, from, to } para busca e período. */
+ *  ownerId: filtra por dono (string ou array). opts: { q, from, to }. */
 export async function listMeetings(ownerId, opts = {}) {
   const meetings = await readAll();
   const q = (opts.q || '').toLowerCase();
   return meetings
-    .filter((m) => !ownerId || m.owner === ownerId)
+    .filter((m) => ownerMatch(m, ownerId))
     .filter((m) => !opts.from || m.createdAt >= opts.from)
     .filter((m) => !opts.to || m.createdAt <= opts.to)
     .filter((m) =>
@@ -68,7 +73,7 @@ export async function listMeetings(ownerId, opts = {}) {
 export async function getMeeting(id, ownerId) {
   const meetings = await readAll();
   const m = meetings.find((x) => x.id === id) || null;
-  if (m && ownerId && m.owner !== ownerId) return null;
+  if (m && !ownerMatch(m, ownerId)) return null;
   return m;
 }
 
@@ -125,7 +130,7 @@ export async function updateMeeting(id, patch) {
 /** Exclui uma reunião (respeitando o dono). Retorna a removida ou null. */
 export async function deleteMeeting(id, ownerId) {
   const meetings = await readAll();
-  const idx = meetings.findIndex((m) => m.id === id && (!ownerId || m.owner === ownerId));
+  const idx = meetings.findIndex((m) => m.id === id && ownerMatch(m, ownerId));
   if (idx === -1) return null;
   const [removed] = meetings.splice(idx, 1);
   await writeAll(meetings);

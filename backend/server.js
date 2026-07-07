@@ -97,10 +97,13 @@ app.get('/api/me', requireUser, (req, res) => {
   res.json({ authEnabled, user: req.user });
 });
 
-// Lista de vendedores (apenas admin) — alimenta o menu de filtro no painel.
+// Lista de vendedores (admin ou supervisor) — alimenta o menu de filtro no
+// painel. O supervisor recebe só quem ele supervisiona (admins ficam de fora).
 app.get('/api/users', requireUser, (req, res) => {
-  if (!req.user || !req.user.admin) return res.status(403).json({ error: 'Apenas admin.' });
-  res.json(listUsers());
+  if (!req.user || (!req.user.admin && !req.user.supervisor)) {
+    return res.status(403).json({ error: 'Apenas admin ou supervisor.' });
+  }
+  res.json(listUsers(req.user));
 });
 
 // --- Áudio completo da reunião -------------------------------------------

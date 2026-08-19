@@ -125,6 +125,38 @@ export async function remuxWebm(buffer) {
 }
 
 /**
+ * Recodifica QUALQUER áudio (mp3, m4a, wav, ogg, mp4…) para webm/opus mono —
+ * o formato que o resto do sistema assume. Necessário porque o remux por cópia
+ * (-c copy) só funciona quando o áudio já é opus/vorbis: um mp3 ou m4a não cabe
+ * num container webm sem recodificar, e seguiria salvo com bytes que não batem
+ * com o nome ".webm" (a transcrição então falha).
+ * Recodificar também encolhe bastante o arquivo — um WAV de 1h (~600MB) vira
+ * ~20MB — o que mantém áudios enviados à mão dentro do limite de upload.
+ * @param {Buffer} buffer áudio em qualquer formato (o ffmpeg detecta sozinho)
+ * @returns {Promise<Buffer>} webm/opus 48kbps mono
+ */
+export async function transcodeToWebm(buffer) {
+  if (!ffmpegPath) throw new Error('ffmpeg-static não disponível');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'eva-transcode-'));
+  try {
+    const input = path.join(dir, 'in'); // sem extensão: o ffmpeg detecta pelo conteúdo
+    const output = path.join(dir, 'out.webm');
+    await fs.writeFile(input, buffer);
+    await runFfmpeg([
+      '-i', input,
+      '-vn',            // descarta vídeo (ex.: .mp4 de reunião gravada)
+      '-c:a', 'libopus',
+      '-b:a', '48k',    // mesmo bitrate da gravação pela extensão
+      '-ac', '1',       // mono: voz não ganha nada com estéreo
+      output,
+    ]);
+    return await fs.readFile(output);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Recorta um trecho do áudio e devolve como WAV 16kHz mono (formato pequeno e
  * universal — usado como amostra de voz de referência na diarização).
  * @param {Buffer} buffer áudio de origem (webm)

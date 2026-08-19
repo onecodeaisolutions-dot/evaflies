@@ -49,11 +49,16 @@
         <button
           id="resend-btn"
           class="resend-btn"
-          title="Enviar um áudio salvo (.webm) para a plataforma — depois é só clicar em Transcrever"
+          title="Enviar um áudio do computador (webm, mp3, m4a, wav, ogg ou mp4) — depois é só clicar em Transcrever"
         >
-          <span class="resend-icon">⤴</span> Reenviar áudio salvo
+          <span class="resend-icon">⤴</span> Enviar áudio do computador
         </button>
-        <input id="resend-file" type="file" accept="audio/webm,audio/*,.webm" class="hidden" />
+        <input
+          id="resend-file"
+          type="file"
+          accept="audio/*,video/mp4,.webm,.mp3,.m4a,.wav,.ogg,.mp4"
+          class="hidden"
+        />
       </div>
 
       <div class="divider"></div>

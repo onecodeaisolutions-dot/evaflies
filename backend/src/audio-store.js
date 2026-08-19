@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import { useSupabase, supabase, SUPABASE_BUCKET } from './storage-config.js';
-import { remuxWebm } from './audio-split.js';
+import { remuxWebm, transcodeToWebm } from './audio-split.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
@@ -29,12 +29,23 @@ export async function initAudioStore() {
 export async function saveAudio(buffer, contentType = 'audio/webm') {
   const id = crypto.randomUUID();
   // Reescreve o container gravando duração + índice de busca (player carrega e
-  // dá seek na hora). Se o remux falhar, usa o arquivo original.
+  // dá seek na hora). O -c copy do remux só funciona se o áudio já for
+  // webm/opus — é o caso do que vem da extensão. Um arquivo enviado à mão
+  // (mp3, m4a, wav, mp4 do Meet/Zoom) faz o remux falhar, e aí recodificamos:
+  // sem isso ele ficaria salvo como ".webm" sem ser webm, e a transcrição
+  // rejeitaria o arquivo.
   let data = buffer;
   try {
     data = await remuxWebm(buffer);
-  } catch (err) {
-    console.warn(`Remux do áudio falhou — salvando original: ${String(err?.message || err).slice(0, 140)}`);
+  } catch (remuxErr) {
+    try {
+      data = await transcodeToWebm(buffer);
+    } catch (err) {
+      console.warn(
+        `Remux (${String(remuxErr?.message || remuxErr).slice(0, 60)}) e conversão ` +
+        `(${String(err?.message || err).slice(0, 60)}) falharam — salvando original.`
+      );
+    }
   }
   if (useSupabase) {
     const { error } = await supabase()

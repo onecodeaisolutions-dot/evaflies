@@ -22,7 +22,7 @@ setGlobalDispatcher(
   })
 );
 
-import { transcribeVerbose, summarize, config } from './src/openai.js';
+import { summarize, config } from './src/openai.js';
 import {
   initStore,
   ping,
@@ -34,9 +34,12 @@ import {
   updateMeeting,
   deleteMeeting,
 } from './src/store.js';
-import { initAudioStore, saveAudio, serveAudio, deleteAudio, loadAudio } from './src/audio-store.js';
+import { initAudioStore, saveAudio, serveAudio, deleteAudio } from './src/audio-store.js';
 import { storageMode } from './src/storage-config.js';
 import { requireUser, ownerFilter, listOwnerFilter, listUsers, authEnabled } from './src/auth.js';
+import { getJob, startTranscription } from './src/transcribe-jobs.js';
+import { createMcpServer } from './src/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -221,54 +224,15 @@ app.post(
 // minutos (blocos de 20min transcritos em sequência) e estourariam o timeout de
 // um request síncrono. O POST dispara o job e devolve 202; o painel acompanha
 // pelo GET (progresso por bloco) até terminar.
-// Jobs em memória: se o servidor reiniciar no meio, o job some e o painel volta
-// a oferecer o botão — é só transcrever de novo.
-const transcribeJobs = new Map(); // meetingId -> {state, current, total, error}
-
-async function runTranscription(meeting) {
-  const job = { state: 'running', current: 0, total: 0, error: null };
-  transcribeJobs.set(meeting.id, job);
-  try {
-    const buffer = await loadAudio(meeting.audioId);
-    const { segments, durationMs: measuredMs } = await transcribeVerbose(
-      buffer, 'audio.webm', 'audio/webm',
-      (current, total) => { job.current = current; job.total = total; }
-    );
-
-    const transcript = segments.map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text)).join('\n');
-    let summary = null;
-    if (transcript.trim()) {
-      try {
-        summary = await summarize(transcript, meeting.title);
-      } catch (err) {
-        console.error('Falha ao resumir:', err.message);
-      }
-    }
-
-    // Conserta a duração se ela tiver vindo zerada (ex.: áudio reenviado manualmente).
-    const patch = { transcript, segments, summary };
-    if (!meeting.durationMs && measuredMs) patch.durationMs = measuredMs;
-    await updateMeeting(meeting.id, patch);
-    transcribeJobs.delete(meeting.id); // done: o GET passa a responder pela reunião
-  } catch (err) {
-    console.error(`Transcrição da reunião ${meeting.id} falhou:`, err);
-    job.state = 'error';
-    job.error = `Falha na transcrição: ${err.message}`;
-  }
-}
-
+// Os jobs vivem em src/transcribe-jobs.js para serem compartilhados com o MCP:
+// transcrição pedida pelo Claude aparece no painel e vice-versa.
 app.post('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
   const meeting = await getMeeting(req.params.id, ownerFilter(req));
   if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
   if (meeting.segments && meeting.segments.length) return res.json(meeting); // já transcrita
   if (!meeting.audioId) return res.status(400).json({ error: 'Esta reunião não tem áudio para transcrever.' });
 
-  const existing = transcribeJobs.get(meeting.id);
-  if (existing && existing.state === 'running') {
-    return res.status(202).json(existing); // já está rodando: só acompanhar
-  }
-  runTranscription(meeting); // sem await: roda em segundo plano
-  res.status(202).json({ state: 'running', current: 0, total: 0 });
+  res.status(202).json(startTranscription(meeting));
 }));
 
 // Status da transcrição (polling do painel).
@@ -276,7 +240,7 @@ app.get('/api/meetings/:id/transcribe', requireUser, wrap(async (req, res) => {
   const meeting = await getMeeting(req.params.id, ownerFilter(req));
   if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
   if (meeting.segments && meeting.segments.length) return res.json({ state: 'done' });
-  res.json(transcribeJobs.get(meeting.id) || { state: 'idle' });
+  res.json(getJob(meeting.id) || { state: 'idle' });
 }));
 
 app.patch('/api/meetings/:id', requireUser, wrap(async (req, res) => {
@@ -343,6 +307,33 @@ app.get('/api/share/:token/audio', wrap(async (req, res) => {
   if (!m || !m.audioId) return res.status(404).json({ error: 'Áudio não encontrado.' });
   return serveAudio(res, m.audioId);
 }));
+
+// --- MCP: o Claude lendo as transcrições ----------------------------------
+// Transporte HTTP sem sessão (sessionIdGenerator: undefined): cada requisição
+// é independente, o que combina com um serviço que pode reiniciar a qualquer
+// momento. A chave de acesso vem por header x-eva-key ou por ?key= na URL —
+// requireUser aceita as duas —, e é ela que define o que o Claude enxerga.
+app.post('/mcp', requireUser, wrap(async (req, res) => {
+  const server = createMcpServer(req.user, ownerFilter(req));
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  res.on('close', () => {
+    transport.close();
+    server.close();
+  });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+}));
+
+// GET/DELETE em /mcp existem no protocolo para sessões SSE, que este servidor
+// stateless não usa. Respondemos 405 com o corpo JSON-RPC que o cliente espera.
+const mcpSemSessao = (req, res) =>
+  res.status(405).json({
+    jsonrpc: '2.0',
+    error: { code: -32000, message: 'Method not allowed.' },
+    id: null,
+  });
+app.get('/mcp', mcpSemSessao);
+app.delete('/mcp', mcpSemSessao);
 
 // --- Painel web (dashboard estilo Fireflies) ------------------------------
 app.use(express.static(PUBLIC_DIR));

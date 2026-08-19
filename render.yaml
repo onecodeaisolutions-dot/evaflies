@@ -5,7 +5,9 @@ services:
     name: evaflies-backend
     runtime: node
     rootDir: backend
-    plan: free
+    # starter (pago): necessário para ter disco persistente — e, de quebra, o
+    # serviço não hiberna, então some a espera de ~50s da primeira requisição.
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
@@ -13,12 +15,13 @@ services:
     envVars:
       - key: OPENAI_API_KEY
         sync: false # você define o valor no painel do Render (secreto)
-      - key: SUPABASE_URL
-        sync: false # Project URL do Supabase
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false # service_role key do Supabase (secreta)
-      - key: SUPABASE_BUCKET
-        value: meeting-audio
+      # Armazenamento: o disco montado abaixo. As reuniões ficam em
+      # meetings.json e os áudios em audio/, dentro de DATA_DIR.
+      - key: DATA_DIR
+        value: /var/data
+      # Supabase desativado — deixe SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY
+      # SEM valor no painel: é o que faz o backend usar o disco. Para voltar a
+      # usar Supabase um dia, basta preencher as duas.
       - key: NODE_VERSION
         value: "22"
       - key: SUMMARY_MODEL
@@ -31,10 +34,10 @@ services:
       # do Render com o JSON dos usuários quando for ativar (ver .env.example).
       - key: EVA_USERS
         sync: false
-      # Para PERSISTIR reuniões e áudios entre deploys, use um disco (plano pago):
-      # - key: DATA_DIR
-      #   value: /var/data
-    # disk:
-    #   name: evaflies-data
-    #   mountPath: /var/data
-    #   sizeGB: 1
+    # Disco persistente: reuniões e áudios sobrevivem a deploys e restarts.
+    # ~21MB por hora de gravação, então 10GB ≈ 470h. Dá para AUMENTAR depois
+    # pelo painel, mas não diminuir — por isso começamos modesto.
+    disk:
+      name: evaflies-data
+      mountPath: /var/data
+      sizeGB: 10

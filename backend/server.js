@@ -353,6 +353,16 @@ app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'Arquivo de áudio grande demais (limite: 200MB).' });
   }
+  // O supabase-js devolve só "fetch failed" quando não alcança o projeto (URL
+  // errada, projeto pausado ou excluído). Sem contexto, quem vê o alerta no
+  // painel não tem como saber o que checar.
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT/i.test(String(err?.message || ''))) {
+    return res.status(502).json({
+      error:
+        'Não consegui falar com o Supabase. Verifique SUPABASE_URL e ' +
+        'SUPABASE_SERVICE_ROLE_KEY no Render, e se o projeto ainda está ativo.',
+    });
+  }
   const status = err.status || err.statusCode || 500;
   res.status(status).json({ error: err.message || 'Erro interno.' });
 });

@@ -239,7 +239,11 @@ export function createMcpServer(user, ownerFilter) {
         );
       }
       if (job.state === 'error') return texto(`"${m.title}": a transcrição falhou — ${job.error}`);
-      const progresso = job.total ? ` (bloco ${job.current} de ${job.total})` : '';
+      // current = blocos CONCLUÍDOS, então o bloco em andamento é o seguinte
+      // (mesma convenção do painel).
+      const progresso = job.total > 1
+        ? ` (bloco ${Math.min(job.current + 1, job.total)} de ${job.total} — reunião longa)`
+        : '';
       return texto(`"${m.title}": transcrevendo${progresso}. Consulte de novo em alguns minutos.`);
     }
   );

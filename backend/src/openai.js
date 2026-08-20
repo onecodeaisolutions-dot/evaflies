@@ -204,6 +204,10 @@ async function transcribeWhisper(buffer, filename, mimetype) {
 async function transcribeDiarizeChunked(buffer, mimetype, onProgress = null) {
   const { chunks, cleanup } = await splitAudio(buffer, 1200); // 20min < teto de ~1400s
   try {
+    // Anuncia o total ANTES do primeiro bloco. Sem isso, quem acompanha fica
+    // vários minutos sem número nenhum enquanto o bloco 1 é transcrito, e a
+    // transcrição parece travada.
+    if (onProgress) onProgress(0, chunks.length);
     const all = [];
     let refs = null;
     // Sequencial (não paralelo): dois uploads grandes ao mesmo tempo saturam a
